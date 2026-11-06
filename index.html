@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KEYS Lab — La Serrure</title>
+    <meta name="description" content="Le laboratoire de KEYS Performance : du bruit à la clé, puis la serrure, rendus en temps réel par la carte graphique." />
+    <meta name="theme-color" content="#0e1726" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="KEYS Lab — La Serrure" />
+    <meta property="og:description" content="Du bruit à la clé, puis la serrure : une expérience rendue en temps réel par la carte graphique." />
+    <meta property="og:locale" content="fr_FR" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;1,6..96,400&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="scene" aria-hidden="true"></canvas>
+    <div class="vignette" aria-hidden="true"></div>
+
+    <div class="loader" id="loader" role="status" aria-live="polite">
+      <div class="loader__inner">
+        <span class="loader__mark">keys. <em>lab</em></span>
+        <span class="loader__track"><span class="loader__bar" id="loader-bar"></span></span>
+        <span class="loader__step" id="loader-step">Préparation</span>
+      </div>
+    </div>
+
+    <p class="sr-only">
+      Expérience visuelle animée, au fil du défilement de la page : des particules désordonnées s’organisent en grille,
+      puis forment une clé. La clé devient métal, entre dans une serrure et tourne ; la porte s’ouvre sur la lumière.
+    </p>
+
+    <header class="hud">
+      <a class="hud__brand" href="https://keysperformance.com/">keys. <em>lab</em></a>
+      <div class="hud__tools">
+        <span class="hud__stats" id="stats"></span>
+        <span class="hud__backend" id="backend"></span>
+      </div>
+    </header>
+
+    <div class="stage is-hidden" id="stage" aria-live="polite">
+      <span class="stage__index" id="stage-index"></span>
+      <h1 class="stage__title" id="stage-title"></h1>
+      <p class="stage__lead" id="stage-lead"></p>
+      <a class="stage__link" id="stage-link" href="https://keysperformance.com/" hidden></a>
+    </div>
+
+    <p class="scroll-hint" id="scroll-hint" aria-hidden="true">Faites défiler <span>↓</span></p>
+
+    <p class="fallback" id="fallback" hidden>
+      Votre navigateur ne permet pas d’afficher cette expérience (ni WebGPU, ni WebGL 2).
+    </p>
+
+    <div class="track" aria-hidden="true"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

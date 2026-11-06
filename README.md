@@ -27,8 +27,8 @@ npm run build
 Le site statique est généré dans `dist/`. Les chemins sont relatifs : il fonctionne
 à la racine d’un domaine (sous-domaine dédié) comme dans un sous-dossier.
 
-Chaque envoi sur la branche `main` le publie sur GitHub Pages (voir `.github/workflows/deploy.yml`),
-sous le domaine `lab.keysperformance.com` (fichier `public/CNAME`).
+Chaque envoi sur la branche `main` le publie sur GitHub Pages (voir `.github/workflows/deploy.yml`) :
+https://argentovalentin-arch.github.io/keys-lab-serrure/
 
 ## Organisation
 

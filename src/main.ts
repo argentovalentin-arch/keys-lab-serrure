@@ -73,7 +73,13 @@ async function start(): Promise<void> {
   scene.environmentIntensity = 0.7;
   pmrem.dispose();
 
-  const door = createDoor();
+  // Official KEYS wordmark for the door; the scene works without it if it fails to load.
+  const logo = await new THREE.TextureLoader().loadAsync('keys-wordmark-cream.png').catch(() => null);
+  if (logo) {
+    logo.colorSpace = THREE.SRGBColorSpace;
+    logo.anisotropy = 4;
+  }
+  const door = createDoor(logo);
   const key = createKeyMesh();
   door.keyHolder.add(key.mesh);
   scene.add(door.group);
@@ -111,7 +117,7 @@ async function start(): Promise<void> {
   await loader.step('Compilation des shaders', 0.6);
   door.setReveal(1);
   door.setGlow(1);
-  key.material.opacity = 1;
+  key.setSolid(1);
   renderer.compute(particles.update);
   const compiled = await Promise.race([
     renderer.compileAsync(scene, camera).then(() => true),
@@ -172,11 +178,14 @@ async function start(): Promise<void> {
     particles.flow.value = state.flow;
     particles.visibility.value = state.particles;
     particles.object.visible = state.particles > 0.001;
+    // The particle key travels into the lock with the metal one, and is cut where the metal begins.
+    particles.object.position.x = state.flow ? 0 : state.insert;
+    key.setSolid(state.solid);
+    particles.cut.value = state.flow ? 100 : key.front.value;
 
-    key.mesh.visible = state.key > 0.001;
-    key.material.opacity = state.key;
     key.mesh.position.x = state.insert;
     key.mesh.rotation.x = state.turn;
+    door.setKeyScale(state.keyScale);
     door.plug.rotation.x = state.turn;
     door.pivot.rotation.y = state.open;
     door.setReveal(state.door);

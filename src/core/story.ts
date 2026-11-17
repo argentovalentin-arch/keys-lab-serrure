@@ -22,10 +22,17 @@ export interface StoryState {
   particles: number;
   /** How much the slow idle sway of the particle shapes applies. */
   sway: number;
-  key: number;
+  /**
+   * Share of the key that is solid metal, from the tip back to the bow. It grows
+   * with the insertion: the tip turns solid as it enters the plug, the whole key
+   * once it is fully in.
+   */
+  solid: number;
   door: number;
   /** Key travel into the lock, in scene units. */
   insert: number;
+  /** Size of the metal key, around the keyhole: it shrinks before it turns. */
+  keyScale: number;
   /** Key and plug rotation, radians. */
   turn: number;
   /** Door opening angle, radians. */
@@ -33,17 +40,30 @@ export interface StoryState {
   glow: number;
 }
 
+// The tip ends inside the door (front face at DOOR_X, 0.3 thick) without coming out at the back.
+const INSERT_DEPTH = 0.5;
+// The door swings away from the viewer, almost fully open.
+const OPEN_ANGLE = 1.7;
+// Once in the lock, the key settles to half its size before it turns. Full size, it sticks
+// out of the lock by almost five units: turning, its bits would cut through the lock plate,
+// and with the door opening, its bow would sweep through the wall beside the doorway.
+// Measured over the whole turn and opening, it clears both from 0.6 down; 0.5 keeps a margin.
+const KEY_OPEN_SCALE = 0.5;
+
 export function storyAt(s: number): StoryState {
+  const insertion = span(s, 2.55, 2.82);
   return {
     morph: clamp(s, 0, 2),
     flow: s >= 3 ? 1 : 0,
-    particles: 1 - span(s, 2, 2.35) + span(s, 3.25, 3.7),
+    // The particles stay until the key is fully in; the solid front hides them as it moves.
+    particles: 1 - span(s, 2.8, 2.82) + span(s, 3.25, 3.7),
     sway: 1 - span(s, 1.4, 2),
-    key: span(s, 2, 2.35),
+    solid: insertion,
     door: span(s, 2.15, 2.6),
-    insert: span(s, 2.55, 2.82) * 0.75,
-    turn: span(s, 2.82, 3) * (Math.PI / 2),
-    open: span(s, 3.05, 3.65) * 1.7,
+    insert: insertion * INSERT_DEPTH,
+    keyScale: 1 - span(s, 2.82, 2.9) * (1 - KEY_OPEN_SCALE),
+    turn: span(s, 2.9, 3) * (Math.PI / 2),
+    open: span(s, 3.05, 3.65) * OPEN_ANGLE,
     glow: span(s, 3.05, 3.5),
   };
 }
@@ -60,6 +80,7 @@ const SHOTS: Shot[] = [
   { at: 2, position: new THREE.Vector3(0, 0, 10), target: new THREE.Vector3(0, 0, 0) },
   { at: 2.7, position: new THREE.Vector3(-4.6, 2.2, 7.2), target: new THREE.Vector3(1.4, 0, 0) },
   { at: 3.1, position: new THREE.Vector3(-4.2, 1.8, 6.4), target: new THREE.Vector3(1.8, 0, 0) },
+  // Last shot: the doorway full of light, and the open door with the key still in its lock.
   { at: 4, position: new THREE.Vector3(-3.6, 1.1, 5.4), target: new THREE.Vector3(DOOR_X + 1, 0, 0.6) },
 ];
 

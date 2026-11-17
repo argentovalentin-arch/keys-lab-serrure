@@ -46,6 +46,8 @@ export function createParticles(count: number) {
   const brightness = uniform(1);
   const flow = uniform(0);
   const visibility = uniform(1);
+  // Local x beyond which particles give way to the solid metal key (see keyMesh.ts).
+  const cut = uniform(100);
 
   // Noise home: a fixed random point in a flattened sphere, even density through the volume.
   const radius = pow(hash(instanceIndex), 1 / 3).mul(CHAOS_RADIUS);
@@ -140,7 +142,12 @@ export function createParticles(count: number) {
   const density = mix(mix(1, 0.35, smoothstep(1, 2, morph)), 1, flow);
   // Along a flow lane, particles fade in at the start and out at the end, so the loop never shows.
   const lane = mix(1, sin(travel.mul(Math.PI)), flow);
-  material.opacityNode = min(disc.mul(disc).mul(0.5).mul(depth).mul(density).mul(brightness).mul(lane).mul(visibility), 1);
+  // Particles fade out just before the cut, so they never overlap the solid part.
+  const beforeCut = smoothstep(cut, cut.sub(0.06), drawn.x);
+  material.opacityNode = min(
+    disc.mul(disc).mul(0.5).mul(depth).mul(density).mul(brightness).mul(lane).mul(visibility).mul(beforeCut),
+    1,
+  );
 
   // Most particles are fine dust; a few are larger, which gives the cloud some grain.
   const grain = hash(instanceIndex.add(uint(count * 4)));
@@ -152,7 +159,7 @@ export function createParticles(count: number) {
 
   return {
     object: sprite, update, positions, velocities, morph, time, delta, pointer, pointerStrength, wander, brightness,
-    flow, visibility, capacity: count,
+    flow, visibility, cut, capacity: count,
   };
 }
 

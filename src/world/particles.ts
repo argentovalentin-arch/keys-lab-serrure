@@ -1,34 +1,40 @@
 import * as THREE from 'three/webgpu';
 import {
-  Fn, clamp, color, cos, float, hash, instanceIndex, instancedArray, length, min, mix, mx_noise_vec3, pow, sin,
-  smoothstep, sqrt, uint, uniform, uv, vec3,
+  Fn, clamp, color, cos, float, hash, instanceIndex, instancedArray, length, max, min, mix, mx_noise_vec3, pow, sin,
+  smoothstep, sqrt, uint, uniform, uv, vec3, vec4,
 } from 'three/tsl';
-import { chaosLayout, keyLayout, KEY_EXTENT } from './shapes';
-import { DOOR_X } from './door';
+import { chaosLayout, keyLayout } from './shapes';
+import { DOOR_X, LEAF } from './door';
+import { PARTICLE_LIFE, dissolveField, dissolveProgress, leafMatrix } from './dissolve';
 
 const CHAOS_RADIUS = 4.5;
-// Light streaming through the open door: where it starts, how far it travels.
-const FLOW_START = DOOR_X + 1.5;
-const FLOW_LENGTH = 12;
-const FLOW_SPEED = 0.07;
-const LATTICE_SIZE = 3.4;
-// How much of the transition is spent waiting for the wave to reach a particle.
-const WAVE = 0.6;
-const WAVE_JITTER = 0.15;
-const WAVE_SPEED = 1 + WAVE + WAVE_JITTER;
+// Door particles stay in the door's own zone: beyond the wall's back face (so never in
+// front of the wall or its casing), and within the doorway's height.
+const DOOR_ZONE_MIN_X = DOOR_X + LEAF.thickness + 0.05;
+const DOOR_ZONE_HALF_HEIGHT = LEAF.height / 2 - 0.1;
+// The key emerging from the noise (morph 0 to 2): each particle sets off for its place
+// in the key at its own moment, in the order of the key layout (outline first, see
+// shapes.ts), and takes this share of the transition to get there. None leaves before
+// KEY_FIRST, so the start is pure noise; the last one arrives as morph reaches 2.
+const KEY_FIRST = 0.15;
+const KEY_TRAVEL = 0.26;
+// Meanwhile the cloud draws in around the key's plane: it gets smaller, flatter and calmer.
+const GATHER_SIZE = 0.62;
+const GATHER_FLAT = 0.4;
 
 /**
  * GPU particle system. Positions and velocities live in storage buffers and are
  * updated by a compute pass every frame; the sprites read the same buffers to
  * draw, so particle data never travels back to the CPU.
  *
- * `morph` drives the shapes: 0 = noise, 1 = lattice, 2 = key. With `flow` at 1 the
- * particles leave the springs and stream out of the doorway as light.
+ * `morph` drives the shapes: 0 = noise, 2 = key, emerging in between. With `flow` at 1 the
+ * particles leave the springs and become the open door breaking up (dissolve.ts):
+ * each one sits on a point of the door and drifts off when the dissolve reaches it.
  *
  * The compute pass uses three storage buffers at most: on the WebGL 2 fallback
  * each one becomes a transform feedback output, and WebGL 2 only guarantees four.
- * That is why the noise and lattice targets are worked out in the shader from the
- * particle index; only the key shape, which needs CPU sampling, is a buffer.
+ * That is why the noise target is worked out in the shader from the particle index;
+ * only the key shape, which needs CPU sampling, is a buffer.
  */
 export function createParticles(count: number) {
   const positions = instancedArray(chaosLayout(count, CHAOS_RADIUS), 'vec3');
@@ -56,24 +62,35 @@ export function createParticles(count: number) {
   const sinPhi = sqrt(float(1).sub(cosPhi.mul(cosPhi)));
   const jitter = hash(instanceIndex.add(uint(count * 3)));
 
-  // Lattice: particle i sits at cell (i % side, i / side % side, i / side²).
-  const side = Math.ceil(Math.cbrt(count));
-  const latticeHome = vec3(
-    instanceIndex.mod(uint(side)).toFloat(),
-    instanceIndex.div(uint(side)).mod(uint(side)).toFloat(),
-    instanceIndex.div(uint(side * side)).toFloat(),
-  ).mul(LATTICE_SIZE / (side - 1)).sub(LATTICE_SIZE / 2);
+  // When this particle sets off for the key: its place in the key layout's order.
+  // The first few go one by one, then more and more at once: a faint outline first,
+  // which thickens as the structuring goes on, rather than the whole outline in one go.
+  const keyStart = pow(instanceIndex.toFloat().div(count), 0.55).mul(1 - KEY_FIRST - KEY_TRAVEL).add(KEY_FIRST);
 
-  // Flow: each particle loops along its own straight lane, from behind the doorway
-  // out past the camera, widening as it goes. `travel` runs 0 -> 1 along the lane.
-  const travel = hash(instanceIndex.add(uint(count * 5)))
-    .add(time.mul(FLOW_SPEED).mul(hash(instanceIndex.add(uint(count * 6))).mul(0.8).add(0.6)))
-    .fract();
-  const spread = travel.mul(0.8).add(1);
+  // Door: each particle has its own point in the door leaf, through its whole volume
+  // (leaf space: x through the thickness, y up, z from the hinge edge). It is released
+  // when the dissolve reaches that point, the very moment the surface there stops being
+  // drawn, then lives for PARTICLE_LIFE of dissolve progress.
+  const doorPoint = vec3(
+    hash(instanceIndex.add(uint(count * 5))).mul(LEAF.thickness + 0.06).sub(0.06),
+    hash(instanceIndex.add(uint(count * 6))).sub(0.5).mul(LEAF.height),
+    hash(instanceIndex.add(uint(count * 7))).mul(LEAF.width),
+  );
+  const age = clamp(dissolveProgress.sub(dissolveField(doorPoint, LEAF.width)).div(PARTICLE_LIFE), 0, 1);
+  const eased = float(1).sub(float(1).sub(age).pow(2));
+  // Released particles lift off the door's front face, rising gently and swirling
+  // along a slow noise field: a controlled drift, not a fall.
+  const faceNormal = leafMatrix.mul(vec4(-1, 0, 0, 0)).xyz;
+  const swirl = mx_noise_vec3(doorPoint.mul(0.9).add(vec3(0, time.mul(0.12), 0))).mul(0.45);
+  const lifted = leafMatrix.mul(vec4(doorPoint, 1)).xyz
+    .add(faceNormal.mul(eased.mul(0.8)))
+    .add(swirl.mul(eased))
+    .add(vec3(0, eased.mul(0.35), 0));
+  // Kept inside the door's zone: behind the wall plane, within the doorway's height.
   const flowHome = vec3(
-    float(FLOW_START).sub(travel.mul(FLOW_LENGTH)),
-    hash(instanceIndex.add(uint(count * 7))).sub(0.5).mul(5.4).mul(spread),
-    hash(instanceIndex.add(uint(count * 8))).sub(0.5).mul(3.6).mul(spread),
+    max(lifted.x, DOOR_ZONE_MIN_X),
+    clamp(lifted.y, -DOOR_ZONE_HALF_HEIGHT, DOOR_ZONE_HALF_HEIGHT),
+    lifted.z,
   );
 
   const update = Fn(() => {
@@ -90,18 +107,23 @@ export function createParticles(count: number) {
       radius.mul(sinPhi).mul(sin(angle)).mul(0.7),
       radius.mul(cosPhi),
     );
+    // Structuring: as the key emerges, the cloud around it draws in towards its plane
+    // and calms down, so what is left of the noise visibly organises itself too.
+    const gather = smoothstep(0.1, 1.7, morph);
+    const gathered = chaosHome.mul(vec3(
+      mix(1, GATHER_SIZE, gather),
+      mix(1, GATHER_SIZE, gather),
+      mix(1, GATHER_SIZE * GATHER_FLAT, gather),
+    ));
     const drift = mx_noise_vec3(chaosHome.mul(0.3).add(vec3(0, 0, time.mul(0.15)))).mul(2)
       .add(mx_noise_vec3(chaosHome.mul(0.9).sub(vec3(time.mul(0.25), 0, 0))).mul(0.6))
-      .mul(wander);
+      .mul(wander).mul(float(1).sub(gather.mul(0.55)));
 
-    // Each shape builds as a wave rather than all at once: the lattice from the
-    // floor up, the key from the bow to the tip. A little jitter keeps the front alive.
-    const latticeDelay = latticeHome.y.div(LATTICE_SIZE).add(0.5).mul(WAVE).add(jitter.mul(WAVE_JITTER));
-    const toLattice = smoothstep(0, 1, clamp(morph.mul(WAVE_SPEED).sub(latticeDelay), 0, 1));
-    const keyDelay = keyHome.x.sub(KEY_EXTENT.minX).div(KEY_EXTENT.maxX - KEY_EXTENT.minX).mul(WAVE).add(jitter.mul(WAVE_JITTER));
-    const toKey = smoothstep(0, 1, clamp(morph.sub(1).mul(WAVE_SPEED).sub(keyDelay), 0, 1));
+    // The key: each particle leaves the cloud at its own moment (keyStart) and settles
+    // into its place, so the silhouette appears out of the particles, outline first.
+    const toKey = smoothstep(keyStart, keyStart.add(KEY_TRAVEL), morph.mul(0.5).add(jitter.mul(0.015)));
 
-    const target = mix(mix(chaosHome.add(drift), latticeHome, toLattice), keyHome, toKey);
+    const target = mix(gathered.add(drift), keyHome, toKey);
 
     // Spring towards the target. Near the pointer, particles are pushed away and
     // swirled around it; the swirl fades once the shapes have formed.
@@ -111,14 +133,14 @@ export function createParticles(count: number) {
     const falloff = smoothstep(1.6, 0, distance).mul(pointerStrength);
     const outward = away.div(distance.add(0.0001));
     const around = vec3(outward.y, outward.x.negate(), 0);
-    const swirl = float(1).sub(toLattice.mul(0.7));
+    const swirl = float(1).sub(gather.mul(0.7));
     force.addAssign(outward.mul(falloff.mul(14)).add(around.mul(falloff.mul(swirl).mul(22))));
 
     velocity.assign(velocity.add(force.mul(delta)).mul(float(1).sub(delta.mul(5)).max(0)));
     position.addAssign(velocity.mul(delta));
 
-    // In the flow the lane decides the position outright. The switch happens while
-    // the particles are hidden, and the loop back to the lane start is faded out.
+    // On the door, its point decides the position outright. The switch happens while
+    // the particles are hidden, and a particle only shows once released.
     position.assign(mix(position, flowHome, flow));
     velocity.assign(velocity.mul(float(1).sub(flow)));
   })().compute(count);
@@ -131,27 +153,36 @@ export function createParticles(count: number) {
   const drawn = positions.toAttribute();
   material.positionNode = drawn;
 
-  // Calm particles stay cream; the ones the pointer scatters warm up.
+  // Calm particles stay cream; the ones the pointer scatters warm up. Off the door,
+  // they leave warm, like the glowing front they break from, and settle to the door's
+  // own navy: seen against the light of the doorway, they read as dark flakes of door.
+  // (Additive cream would vanish into that light; see setDoorMode.)
   const speed = length(velocities.toAttribute());
-  material.colorNode = mix(color('#f4ecdc'), color('#e3a35a'), smoothstep(0.4, 3, speed));
+  const shapeColor = mix(color('#f4ecdc'), color('#e3a35a'), smoothstep(0.4, 3, speed));
+  const doorColor = mix(color('#c98a45'), color('#1c2a44'), smoothstep(0, 0.5, age));
+  material.colorNode = mix(shapeColor, doorColor, flow);
 
   // A soft disc, dimmer at the back for depth. The key is dense, so it is drawn
   // fainter, otherwise the additive blend burns it to flat white.
   const disc = clamp(float(1).sub(length(uv().sub(0.5)).mul(2)), 0, 1);
-  const depth = mix(0.35, 1, smoothstep(-CHAOS_RADIUS, CHAOS_RADIUS, drawn.z));
+  const depth = mix(mix(0.35, 1, smoothstep(-CHAOS_RADIUS, CHAOS_RADIUS, drawn.z)), 1, flow);
   const density = mix(mix(1, 0.35, smoothstep(1, 2, morph)), 1, flow);
-  // Along a flow lane, particles fade in at the start and out at the end, so the loop never shows.
-  const lane = mix(1, sin(travel.mul(Math.PI)), flow);
+  // Off the door, a particle shows only once released, then fades out as it drifts.
+  const lane = mix(1, smoothstep(0, 0.12, age).mul(float(1).sub(smoothstep(0.45, 1, age))), flow);
   // Particles fade out just before the cut, so they never overlap the solid part.
   const beforeCut = smoothstep(cut, cut.sub(0.06), drawn.x);
+  // Door flakes are drawn with normal blending against the light: a little more opaque.
+  const doorOpacity = mix(1, 1.8, flow);
   material.opacityNode = min(
-    disc.mul(disc).mul(0.5).mul(depth).mul(density).mul(brightness).mul(lane).mul(visibility).mul(beforeCut),
+    disc.mul(disc).mul(0.5).mul(depth).mul(density).mul(brightness).mul(lane).mul(visibility).mul(beforeCut)
+      .mul(doorOpacity),
     1,
   );
 
   // Most particles are fine dust; a few are larger, which gives the cloud some grain.
+  // Off the door, they are flakes, a little larger, to read against the light.
   const grain = hash(instanceIndex.add(uint(count * 4)));
-  material.scaleNode = float(0.02).add(pow(grain, 6).mul(0.06));
+  material.scaleNode = float(0.02).add(pow(grain, 6).mul(0.06)).mul(mix(1, 2.2, flow));
 
   const sprite = new THREE.Sprite(material);
   sprite.count = count;
@@ -160,6 +191,13 @@ export function createParticles(count: number) {
   return {
     object: sprite, update, positions, velocities, morph, time, delta, pointer, pointerStrength, wander, brightness,
     flow, visibility, cut, capacity: count,
+    /** Light on dark for the shapes (additive), flakes against the light for the door (normal). */
+    setDoorMode(on: boolean) {
+      const blending = on ? THREE.NormalBlending : THREE.AdditiveBlending;
+      if (material.blending === blending) return;
+      material.blending = blending;
+      material.needsUpdate = true;
+    },
   };
 }
 

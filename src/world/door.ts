@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
-import { color, uniform } from 'three/tsl';
+import { color, max, positionWorld, smoothstep, uniform, vec4 } from 'three/tsl';
 import { KEY_DEPTH } from './shapes';
+import { DISSOLVE_EDGE, buildFront, dissolveField, dissolveProgress, leafInverse } from './dissolve';
 
 /** Front face of the door, on the x axis: the key points straight at it. */
 export const DOOR_X = 2.6;
@@ -8,12 +9,18 @@ const HALF_HEIGHT = 3;
 const HALF_WIDTH = 2;
 const THICKNESS = 0.3;
 const WALL_REACH = 30;
+// A little narrower than the doorway: its free edge needs that clearance to swing
+// past the far jamb without grazing it.
+const CLEARANCE = 0.03;
+/** The door leaf: thickness (leaf x), height (leaf y), width from the hinge edge (leaf z). */
+export const LEAF = { thickness: THICKNESS, height: HALF_HEIGHT * 2, width: HALF_WIDTH * 2 - CLEARANCE };
 
 /**
  * Wall, door and lock. The door turns on a hinge along its far edge (z = -HALF_WIDTH)
- * and swings away from the viewer, stopping ajar (see OPEN_ANGLE in story.ts). The key is parented
+ * and swings away from the viewer (see OPEN_ANGLE in story.ts). The key is parented
  * to the door through `keyHolder`, so once it is in the lock it swings open with the door.
- * Behind the wall, a bright panel stands for the light on the other side.
+ * Once open, the door and its lock dissolve into particles (dissolve.ts); the wall and
+ * its casing stay whole. Behind the wall, a bright panel stands for the light on the other side.
  *
  * `logo` is the official KEYS wordmark; without it the door simply has no mark.
  */
@@ -23,6 +30,18 @@ export function createDoor(logo: THREE.Texture | null = null) {
   const material = (params: ConstructorParameters<typeof THREE.MeshStandardNodeMaterial>[0]) => {
     const m = new THREE.MeshStandardNodeMaterial({ ...params, transparent: true, opacity: 0 });
     fading.push(m);
+    return m;
+  };
+  // Everything on the door leaf builds up, then dissolves, along the same field
+  // (dissolve.ts): only beyond the active front is it drawn, and just there the
+  // surface glows warm, where it is forming or breaking away. The leaf does not fade
+  // with the wall: the front alone brings it in.
+  const leafMaterial = (params: ConstructorParameters<typeof THREE.MeshStandardNodeMaterial>[0]) => {
+    const m = new THREE.MeshStandardNodeMaterial({ ...params, transparent: true });
+    const field = dissolveField(leafInverse.mul(vec4(positionWorld, 1)).xyz, LEAF.width);
+    const front = max(buildFront, dissolveProgress);
+    m.maskNode = field.greaterThan(front);
+    m.emissiveNode = color('#ffd9a0').mul(smoothstep(front.add(DISSOLVE_EDGE), front, field)).mul(2);
     return m;
   };
 
@@ -60,14 +79,11 @@ export function createDoor(logo: THREE.Texture | null = null) {
   leaf.position.x = -THICKNESS;
   pivot.add(leaf);
 
-  // A little narrower than the doorway: its free edge needs that clearance to swing
-  // past the far jamb without grazing it.
-  const CLEARANCE = 0.03;
   const door = new THREE.Mesh(
-    new THREE.BoxGeometry(THICKNESS, HALF_HEIGHT * 2, HALF_WIDTH * 2 - CLEARANCE),
-    material({ color: '#17243b', metalness: 0.35, roughness: 0.45 }),
+    new THREE.BoxGeometry(THICKNESS, LEAF.height, LEAF.width),
+    leafMaterial({ color: '#17243b', metalness: 0.35, roughness: 0.45 }),
   );
-  door.position.set(THICKNESS / 2, 0, HALF_WIDTH - CLEARANCE / 2);
+  door.position.set(THICKNESS / 2, 0, LEAF.width / 2);
   leaf.add(door);
 
   const box = (m: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) => {
@@ -77,8 +93,8 @@ export function createDoor(logo: THREE.Texture | null = null) {
   };
 
   // Two raised panels, above and below the lock: a moulded frame around a slightly darker field.
-  const moulding = material({ color: '#22324f', metalness: 0.4, roughness: 0.38 });
-  const field = material({ color: '#121e33', metalness: 0.25, roughness: 0.6 });
+  const moulding = leafMaterial({ color: '#22324f', metalness: 0.4, roughness: 0.38 });
+  const field = leafMaterial({ color: '#121e33', metalness: 0.25, roughness: 0.6 });
   const BAR = 0.07;
   const RELIEF = 0.04;
   for (const [y0, y1] of [[0.75, 2.55], [-2.55, -0.75]]) {
@@ -95,13 +111,13 @@ export function createDoor(logo: THREE.Texture | null = null) {
 
   // Hinge knuckles on the hinge line (the back face, so they show once the door opens),
   // and a brushed kick plate at the foot of the door.
-  const hingeBrass = material({ color: '#a8844f', metalness: 1, roughness: 0.3 });
+  const hingeBrass = leafMaterial({ color: '#a8844f', metalness: 1, roughness: 0.3 });
   for (const y of [2.3, 0, -2.3]) {
     const knuckle = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.42, 24), hingeBrass);
     knuckle.position.set(THICKNESS, y, 0);
     leaf.add(knuckle);
   }
-  const kickPlate = material({ color: '#9c7c4c', metalness: 1, roughness: 0.55 });
+  const kickPlate = leafMaterial({ color: '#9c7c4c', metalness: 1, roughness: 0.55 });
   leaf.add(box(kickPlate, -0.015, 0, -2.95, -2.7, 0.2, HALF_WIDTH * 2 - 0.2));
 
   // The KEYS wordmark, set in the upper panel: brass-tinted, like an engraved mark.
@@ -111,7 +127,7 @@ export function createDoor(logo: THREE.Texture | null = null) {
     const width = height * (image.width / image.height);
     const mark = new THREE.Mesh(
       new THREE.PlaneGeometry(width, height),
-      material({ map: logo, color: '#c9a36a', metalness: 0.8, roughness: 0.35 }),
+      leafMaterial({ map: logo, color: '#c9a36a', metalness: 0.8, roughness: 0.35 }),
     );
     mark.rotation.y = -Math.PI / 2; // faces the viewer's side (-x)
     mark.position.set(-0.014, 1.65, HALF_WIDTH);
@@ -128,7 +144,7 @@ export function createDoor(logo: THREE.Texture | null = null) {
   );
 
   // Lock: a brass plate and, inside it, the plug that turns with the key.
-  const brass = material({ color: '#b8925a', metalness: 1, roughness: 0.32 });
+  const brass = leafMaterial({ color: '#b8925a', metalness: 1, roughness: 0.32 });
   const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.06, 64), brass);
   plate.rotation.z = Math.PI / 2;
   plate.position.set(-0.03, 0, HALF_WIDTH);
@@ -138,13 +154,13 @@ export function createDoor(logo: THREE.Texture | null = null) {
   plug.position.set(-0.065, 0, HALF_WIDTH);
   const plugFace = new THREE.Mesh(
     new THREE.CylinderGeometry(0.36, 0.36, 0.03, 48),
-    material({ color: '#8f6f42', metalness: 1, roughness: 0.4 }),
+    leafMaterial({ color: '#8f6f42', metalness: 1, roughness: 0.4 }),
   );
   plugFace.rotation.z = Math.PI / 2;
   // Keyway: the key's profile, from the top of the shaft to the deepest bit, as wide as the key.
   const slot = new THREE.Mesh(
     new THREE.BoxGeometry(0.02, 0.76, KEY_DEPTH + 0.02),
-    material({ color: '#05080d', roughness: 1 }),
+    leafMaterial({ color: '#05080d', roughness: 1 }),
   );
   slot.position.y = -0.24;
   plug.add(plugFace, slot);
@@ -163,6 +179,8 @@ export function createDoor(logo: THREE.Texture | null = null) {
   return {
     group,
     pivot,
+    /** The door itself; its world matrix drives the dissolve (see dissolve.ts). */
+    leaf,
     plug,
     keyHolder,
     /** Key size, 1 = as formed from the particles. The keyway follows its profile. */

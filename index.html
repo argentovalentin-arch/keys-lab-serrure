@@ -13,7 +13,7 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;1,6..96,400&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;1,6..96,400;1,6..96,500&display=swap" rel="stylesheet" />
   </head>
   <body>
     <canvas id="scene" aria-hidden="true"></canvas>
@@ -41,11 +41,37 @@
     </header>
 
     <div class="stage is-hidden" id="stage" aria-live="polite">
-      <span class="stage__index" id="stage-index"></span>
       <h1 class="stage__title" id="stage-title"></h1>
       <p class="stage__lead" id="stage-lead"></p>
-      <a class="stage__link" id="stage-link" href="https://keysperformance.com/" hidden></a>
+      <div class="stage__actions">
+        <a class="stage__link" id="stage-link" href="https://keysperformance.com/" hidden></a>
+        <button class="stage__link stage__action" id="stage-action" type="button" hidden></button>
+      </div>
     </div>
+
+    <!-- The Terrain epilogue (src/terrain/), entered from the last chapter only. -->
+    <div class="veil" id="veil" aria-hidden="true"></div>
+    <section class="terrain-ui" id="terrain-ui" aria-label="Le Terrain" hidden>
+      <p class="terrain-ui__message" id="terrain-message">La porte est ouverte. À vous de jouer.</p>
+      <p class="terrain-ui__word is-hidden" id="terrain-word" aria-live="polite">
+        <span class="terrain-ui__tag"><span id="terrain-word-step"></span><span class="terrain-ui__rule" aria-hidden="true"></span><span id="terrain-word-label"></span></span>
+        <span class="terrain-ui__name" id="terrain-word-name"></span>
+      </p>
+      <div class="terrain-tags" id="terrain-tags" aria-hidden="true"></div>
+      <p class="terrain-ui__note" id="terrain-note" aria-live="polite"></p>
+      <p class="terrain-ui__hint" id="terrain-hint">
+        Guidez la lumière vers la gauche ou la droite : pointeur, glissement du doigt ou flèches du clavier.
+      </p>
+      <div class="terrain-ui__end" id="terrain-end" hidden>
+        <p class="terrain-ui__caption">Votre courbe de croissance, tracée par votre parcours.</p>
+        <div class="terrain-ui__choices">
+          <a class="stage__link" href="https://keysperformance.com/">Découvrir Keys Performance</a>
+          <button class="stage__link stage__action" id="terrain-replay" type="button">Rejouer</button>
+          <button class="stage__link stage__action" id="terrain-back" type="button">Revenir au récit</button>
+        </div>
+      </div>
+      <button class="terrain-ui__close" id="terrain-close" type="button">Quitter le Terrain <span aria-hidden="true">✕</span></button>
+    </section>
 
     <p class="scroll-hint" id="scroll-hint" aria-hidden="true">Faites défiler <span>↓</span></p>
 

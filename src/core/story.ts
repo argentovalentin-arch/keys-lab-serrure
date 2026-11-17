@@ -1,9 +1,11 @@
 import * as THREE from 'three/webgpu';
 import { DOOR_X } from '../world/door';
+import { PARTICLE_LIFE } from '../world/dissolve';
 
 /**
  * The whole experience is driven by one number, the story position `s`:
- * 0 = noise, 1 = lattice, 2 = particle key, 3 = key turned in the lock, 4 = door open.
+ * 0 = noise, 1 = the key emerging from it, 2 = particle key, then metal, 3 = key turned
+ * in the lock, 4 = door open.
  * Every function here turns `s` into the state of one element, so the scroll can
  * move both ways and the scene always matches it.
  */
@@ -14,21 +16,24 @@ const { clamp, smoothstep } = THREE.MathUtils;
 const span = (s: number, from: number, to: number) => smoothstep(s, from, to);
 
 export interface StoryState {
-  /** Particle shape: 0 noise, 1 lattice, 2 key. */
+  /** Particle shape: 0 noise, 2 key, the key emerging in between. */
   morph: number;
-  /** 1 once the particles have become the light pouring through the door. */
+  /** 1 once the particles have left the key for the door, ready to break it up. */
   flow: number;
-  /** Particle opacity; they hand over to the metal key, then come back as light. */
+  /** Particle opacity; they hand over to the metal key, then come back as the door breaks up. */
   particles: number;
   /** How much the slow idle sway of the particle shapes applies. */
   sway: number;
   /**
-   * Share of the key that is solid metal, from the tip back to the bow. It grows
-   * with the insertion: the tip turns solid as it enters the plug, the whole key
-   * once it is fully in.
+   * Share of the key that is solid metal, from the tip back to the bow. Once the
+   * particle silhouette is complete it turns into the modelled key, in place, while the
+   * camera moves round to show its depth; only then does it go into the lock.
    */
   solid: number;
+  /** Wall and casing opacity. */
   door: number;
+  /** The door building itself up, 0 to 1 (see dissolve.ts). */
+  build: number;
   /** Key travel into the lock, in scene units. */
   insert: number;
   /** Size of the metal key, around the keyhole: it shrinks before it turns. */
@@ -38,6 +43,8 @@ export interface StoryState {
   /** Door opening angle, radians. */
   open: number;
   glow: number;
+  /** Progress of the open door dissolving into particles (see dissolve.ts). */
+  dissolve: number;
 }
 
 // The tip ends inside the door (front face at DOOR_X, 0.3 thick) without coming out at the back.
@@ -55,16 +62,23 @@ export function storyAt(s: number): StoryState {
   return {
     morph: clamp(s, 0, 2),
     flow: s >= 3 ? 1 : 0,
-    // The particles stay until the key is fully in; the solid front hides them as it moves.
-    particles: 1 - span(s, 2.8, 2.82) + span(s, 3.25, 3.7),
+    // The particles stay until the key is fully in; the solid front hides them as it moves
+    // (and has passed them all before the insertion starts).
+    // They come back on the door, each one showing only as the dissolve releases it.
+    particles: 1 - span(s, 2.8, 2.82) + span(s, 3.6, 3.62),
     sway: 1 - span(s, 1.4, 2),
-    solid: insertion,
+    solid: span(s, 2.05, 2.45),
     door: span(s, 2.15, 2.6),
+    // While the wall fades in; complete just before the key reaches the lock.
+    build: span(s, 2.15, 2.52),
     insert: insertion * INSERT_DEPTH,
     keyScale: 1 - span(s, 2.82, 2.9) * (1 - KEY_OPEN_SCALE),
     turn: span(s, 2.9, 3) * (Math.PI / 2),
     open: span(s, 3.05, 3.65) * OPEN_ANGLE,
     glow: span(s, 3.05, 3.5),
+    // Once the door is fully open: from just before the first point goes to just
+    // after the last particle has faded.
+    dissolve: span(s, 3.66, 3.98) * (1 + PARTICLE_LIFE + 0.04) - 0.02,
   };
 }
 

@@ -2,6 +2,8 @@
   --navy: #0e1726;
   --cream: #f4ecdc;
   --cream-soft: rgba(244, 236, 220, 0.62);
+  /* Between the cream of the text and the brass of the key and lock. */
+  --champagne: #dcc59b;
   --serif: 'Bodoni Moda', Didot, serif;
   --sans: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
   --gutter: clamp(16px, 4vw, 48px);
@@ -57,6 +59,10 @@ html, body {
   text-decoration: none;
 }
 
+/* "lab" in the keys. lab logo, in the header and on the loader. */
+.hud__brand em,
+.loader__mark em { color: var(--champagne); }
+
 .hud__tools {
   display: flex;
   gap: 16px;
@@ -83,15 +89,6 @@ html, body {
 .stage.is-hidden {
   opacity: 0;
   transform: translateY(8px);
-}
-
-.stage__index {
-  display: block;
-  margin-bottom: 10px;
-  font-size: 0.75rem;
-  letter-spacing: 0.12em;
-  color: var(--cream-soft);
-  font-variant-numeric: tabular-nums;
 }
 
 .stage__title {
@@ -122,6 +119,300 @@ html, body {
 
 .stage__link:hover, .stage__link:focus-visible { background: var(--cream); color: var(--navy); }
 .stage__link[hidden] { display: none; }
+
+/* The wrapper adds no box of its own: the link keeps exactly its place. */
+.stage__actions { display: contents; }
+
+.stage__action {
+  margin-left: 10px;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  /* The champagne of the logo: the way further into the lab. */
+  border-color: var(--champagne);
+  color: var(--champagne);
+}
+
+/* On its own, the action stands where the link would be. */
+.stage__link[hidden] + .stage__action { margin-left: 0; }
+
+/* ---------- Terrain epilogue ---------- */
+
+/* While in the Terrain: the page does not scroll, the story's text steps aside. */
+html.is-terrain, html.is-terrain body { overflow: hidden; overscroll-behavior: none; }
+html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
+
+/* Light (into the Terrain) or dark (back to the story) wash over the whole screen. */
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  background: #f3e7d3;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+
+.veil.is-dark { background: var(--navy); }
+.veil.is-slow { transition-duration: 1.4s; }
+.veil.is-on { opacity: 1; }
+
+.terrain-ui {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  /* Horizontal drags steer: they must never scroll or swipe the browser back. */
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+}
+
+.terrain-ui[hidden] { display: none; }
+
+.terrain-ui__message {
+  position: absolute;
+  top: 18vh;
+  left: var(--gutter);
+  right: var(--gutter);
+  margin: 0;
+  text-align: center;
+  font-family: var(--serif);
+  font-size: clamp(1.6rem, 4vw, 2.6rem);
+  text-shadow: 0 1px 18px rgba(5, 9, 17, 0.7);
+  transition: opacity 1.2s ease;
+}
+
+.terrain-ui__hint {
+  position: absolute;
+  bottom: clamp(32px, 8vh, 80px);
+  left: var(--gutter);
+  right: var(--gutter);
+  margin: 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--cream-soft);
+  transition: opacity 1.2s ease;
+}
+
+/* A landmark's name: one at a time, the strongest text of the Terrain, above the path.
+   Set like the brand's display titles: Bodoni Moda at its display optical size, light and
+   tight, ending on the champagne full stop of the « keys. » wordmark. It comes in letter
+   by letter, out of a slight blur. Over it, a readout line: the step, a rule, what the
+   stage is about (Archivo capitals, spaced, like the site's eyebrows). Larger and set
+   apart from the notes, which are smaller, in the scene, with an italic word. */
+.terrain-ui__word {
+  position: absolute;
+  top: 16vh;
+  left: var(--gutter);
+  right: var(--gutter);
+  margin: 0;
+  text-align: center;
+  text-shadow: 0 2px 24px rgba(5, 9, 17, 0.9);
+  transition: opacity 0.9s ease;
+}
+.terrain-ui__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--cream-soft);
+}
+.terrain-ui__tag > span:first-child { color: var(--champagne); font-variant-numeric: tabular-nums; }
+.terrain-ui__rule {
+  width: 40px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--champagne), rgba(220, 197, 155, 0.2));
+  transform-origin: left;
+  transition: transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s;
+}
+.terrain-ui__name {
+  display: block;
+  font-family: var(--serif);
+  font-weight: 400;
+  font-variation-settings: 'opsz' 96;
+  font-size: clamp(3rem, 7vw, 5.8rem);
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  color: var(--cream);
+}
+.terrain-ui__name > span {
+  display: inline-block;
+  transition: opacity 0.7s ease, transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1), filter 0.8s ease;
+  transition-delay: calc(var(--i, 0) * 35ms);
+}
+.terrain-ui__name .terrain-ui__dot { color: var(--champagne); margin-left: 0.02em; transition-delay: 0.4s; }
+.terrain-ui__word.is-hidden .terrain-ui__name > span {
+  opacity: 0;
+  transform: translateY(0.18em);
+  filter: blur(6px);
+  transition-delay: 0s;
+  transition-duration: 0.3s;
+}
+/* It goes quicker than it comes, to leave the view to the notes that follow. */
+.terrain-ui__word.is-hidden { transition-duration: 0.35s; }
+.terrain-ui__word.is-hidden .terrain-ui__rule { transform: scaleX(0); transition-delay: 0s; }
+
+/* Labels popping up in the scene with each note (src/terrain/terrain.ts, placeTags): a
+   small badge of light holding a pictogram or a channel's mark (icons.ts), over a dotted
+   thread down to the point it belongs to. Placed by the Terrain every frame; they pop in
+   when they first show. */
+.terrain-tags { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+.terrain-tag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform, opacity;
+}
+.terrain-tag__label {
+  position: absolute;
+  left: 0;
+  bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transform: translateX(-50%);
+  animation: terrain-tag-pop 0.65s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+.terrain-tag__badge {
+  display: flex;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid rgba(220, 197, 155, 0.6);
+  border-radius: 999px;
+  background: rgba(14, 23, 38, 0.72);
+  box-shadow: 0 0 18px rgba(255, 217, 160, 0.18), inset 0 0 10px rgba(220, 197, 155, 0.12);
+  color: var(--cream);
+}
+.terrain-tag__icon { display: block; width: 27px; height: 27px; }
+.terrain-tag__icon svg { display: block; width: 100%; height: 100%; }
+/* The few words naming it: small, spaced capitals on a dark backing so they read on the
+   lit ground; clearly below the notes and titles. */
+.terrain-tag__caption {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(10, 16, 28, 0.6);
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cream);
+  text-shadow: 0 1px 8px rgba(5, 9, 17, 0.95);
+}
+.terrain-tag__thread {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 1px;
+  transform-origin: 0 50%;
+  background: repeating-linear-gradient(90deg, rgba(220, 197, 155, 0.75) 0 2px, transparent 2px 6px);
+  animation: terrain-tag-thread 0.5s ease both;
+}
+@keyframes terrain-tag-pop {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(0.6); }
+}
+@keyframes terrain-tag-thread {
+  from { opacity: 0; }
+}
+
+/* Markers for the visitor (src/terrain/notes.ts), set in the scene beside the path: the
+   Terrain places them on screen every frame (position, scale, fade). Set like the brand's
+   titles: Bodoni Moda 500, tight, one word in italics, the full stop in champagne. */
+.terrain-ui__note {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  opacity: 0;
+  white-space: nowrap;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(1.8rem, 3.1vw, 2.8rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--cream);
+  text-shadow: 0 2px 22px rgba(5, 9, 17, 0.95), 0 0 2px rgba(5, 9, 17, 0.6);
+  pointer-events: none;
+  will-change: transform, opacity;
+  /* The note reads first: always over the badges and the scene's labels. */
+  z-index: 2;
+}
+.terrain-ui__note em { font-style: italic; color: var(--champagne); }
+.terrain-ui__dot { color: var(--champagne); }
+
+/* Narrow screens: a little smaller, and allowed to wrap. */
+@media (max-width: 700px) {
+  .terrain-ui__note {
+    font-size: 1.45rem;
+    white-space: normal;
+    width: 78vw;
+  }
+}
+
+.terrain-ui__message.is-hidden, .terrain-ui__hint.is-hidden, .terrain-ui__word.is-hidden { opacity: 0; }
+
+/* The closing choices, just under the visitor's curve. The chart's time axis sits a
+   little above mid-height whatever the screen (the camera's vertical field of view is
+   fixed), so the choices are anchored from the top, between the chart and the mountain. */
+.terrain-ui__end {
+  position: absolute;
+  left: var(--gutter);
+  right: var(--gutter);
+  top: 53%;
+  text-align: center;
+  animation: terrain-end-in 0.9s ease both;
+}
+
+.terrain-ui__end[hidden] { display: none; }
+
+.terrain-ui__caption {
+  margin: 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: clamp(1.1rem, 2.4vw, 1.5rem);
+  text-shadow: 0 1px 14px rgba(5, 9, 17, 0.8);
+}
+
+.terrain-ui__choices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* Over the lit ground, the buttons sit on a navy veil so they keep their contrast. */
+.terrain-ui__choices .stage__link {
+  background: rgba(14, 23, 38, 0.72);
+}
+
+.terrain-ui__choices .stage__action { margin-left: 0; }
+.terrain-ui__choices .stage__link:hover,
+.terrain-ui__choices .stage__link:focus-visible { background: var(--cream); color: var(--navy); }
+
+@keyframes terrain-end-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+.terrain-ui__close {
+  position: absolute;
+  top: 72px;
+  right: var(--gutter);
+  padding: 10px 18px;
+  border: 1px solid rgba(244, 236, 220, 0.5);
+  border-radius: 999px;
+  background: rgba(14, 23, 38, 0.55);
+  color: var(--cream);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.terrain-ui__close:hover, .terrain-ui__close:focus-visible { background: var(--cream); color: var(--navy); }
 
 /* Darkens the edges so the cloud sits in a pool of light. */
 .vignette {

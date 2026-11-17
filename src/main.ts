@@ -6,25 +6,33 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import Lenis from 'lenis';
 import { createParticles } from './world/particles';
 import { createKeyMesh } from './world/keyMesh';
-import { createDoor } from './world/door';
+import { prepareKeyGlyph } from './world/glyph';
+import { DOOR_X, createDoor } from './world/door';
+import { dissolveProgress, leafInverse, leafMatrix, setBuild } from './world/dissolve';
 import { STORY_END, cameraAt, storyAt } from './core/story';
 import { FrameMonitor, TIERS, forcedTier, initialTier, type Tier } from './core/quality';
 import { Loader } from './ui/loader';
 import { Stage, type Chapter } from './ui/stage';
+import { Epilogue } from './ui/epilogue';
 
 const NAVY = '#0e1726';
 
 const CHAPTERS: Chapter[] = [
-  { title: 'Le bruit', lead: 'Beaucoup d’agitation, aucune direction.' },
-  { title: 'Structurer', lead: 'Chaque élément trouve sa place.' },
-  { title: 'La clé', lead: 'Une forme précise, pour une serrure précise.' },
-  { title: 'Activer', lead: 'La bonne clé, au bon endroit, au bon moment.' },
+  { title: 'Tout est là.', lead: 'Rien n’est encore à sa place.' },
+  { title: 'Vous la reconnaissez ?', lead: 'Elle était là depuis le début.' },
+  { title: 'Plus qu’une idée', lead: 'Elle prend du poids.' },
+  { title: 'Il fallait cette clé-là', lead: 'Aucune autre n’aurait tourné.' },
   {
-    title: 'Performer',
-    lead: 'Ce qui était fermé s’ouvre.',
-    link: { href: 'https://keysperformance.com/', label: 'Découvrir KEYS Performance →' },
+    title: 'Chaque entreprise a sa clé',
+    lead: 'Keys Performance vous aide à la trouver.',
+    // One button, on every quality tier: it goes through the door, into the Terrain
+    // (which takes its particle count from the tier); the site comes at the end of it.
+    action: 'Entrer pour découvrir Keys Performance',
   },
 ];
+// Where the camera goes when the visitor enters the Terrain: through the open doorway.
+const DOORWAY_EYE = new THREE.Vector3(DOOR_X + 0.6, 0.3, 0.2);
+const DOORWAY_LOOK = new THREE.Vector3(DOOR_X + 6, 0.2, 0);
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
 const fallback = document.querySelector<HTMLElement>('#fallback')!;
@@ -58,6 +66,8 @@ async function start(): Promise<void> {
   camera.position.set(0, 0, 10);
 
   await loader.step(`Génération de ${formatNumber(TIERS[tier].particles)} particules`, 0.25);
+  // The key's bow is the brand's « k », from its typeface: ready before the key is laid out.
+  await prepareKeyGlyph();
   const particles = createParticles(TIERS[tier].particles);
   scene.add(particles.object);
   // Reduced motion: no pointer push and a much slower drift.
@@ -125,11 +135,22 @@ async function start(): Promise<void> {
   ]);
   if (!compiled) console.warn('KEYS Lab: shader precompilation timed out, continuing');
   await loader.step('Premier rendu', 0.85);
+  // Both particle blendings get their pipeline now, so the switch to the door later never stutters.
+  particles.setDoorMode(true);
+  draw();
+  particles.setDoorMode(false);
   draw();
 
   const stage = new Stage(CHAPTERS, reducedMotion);
   stage.show(0);
   const lenis = new Lenis({ autoRaf: false, lerp: reducedMotion ? 1 : 0.15 });
+  // The Terrain epilogue: its module is only fetched when the visitor presses « Entrer ».
+  const epilogue = new Epilogue({
+    renderer,
+    lenis,
+    trigger: stage.action,
+    fieldCount: () => Math.round(TIERS[monitor.current].particles * 0.45),
+  });
 
   // Pointer, projected on the z = 0 plane then moved into the particles' local space.
   const ndc = new THREE.Vector2();
@@ -155,14 +176,33 @@ async function start(): Promise<void> {
 
   const timer = new THREE.Timer();
   let story = 0;
+  let dissolve = -1;
   let distanceScale = 1;
   let statsTime = 0;
   let statsFrames = 0;
+
+  const sampleFrame = () => {
+    monitor.sample(timer.getDelta());
+    statsTime += timer.getDelta();
+    statsFrames++;
+    if (statsTime >= 0.5) {
+      const fps = Math.round(statsFrames / statsTime);
+      statsLabel.textContent = `${fps} i/s · ${formatNumber(particles.object.count)} particules · ${monitor.current}`;
+      if (import.meta.env.DEV) Object.assign(window, { __lab: { fps, backend: backendName, tier: monitor.current, count: particles.object.count, story } });
+      statsTime = statsFrames = 0;
+    }
+  };
 
   renderer.setAnimationLoop((now: number) => {
     timer.update(now);
     lenis.raf(now);
     const dt = Math.min(timer.getDelta(), 1 / 30);
+
+    if (epilogue.inTerrain) {
+      epilogue.frame(dt);
+      sampleFrame();
+      return;
+    }
 
     const progress = scrollProgress();
     // The story moves a little behind the scroll, so a flick of the wheel still reads as a transition.
@@ -176,6 +216,7 @@ async function start(): Promise<void> {
     particles.object.rotation.y = reducedMotion ? 0 : Math.sin(timer.getElapsed() * 0.15) * 0.35 * state.sway;
     particles.morph.value = state.morph;
     particles.flow.value = state.flow;
+    particles.setDoorMode(state.flow === 1);
     particles.visibility.value = state.particles;
     particles.object.visible = state.particles > 0.001;
     // The particle key travels into the lock with the metal one, and is cut where the metal begins.
@@ -188,6 +229,15 @@ async function start(): Promise<void> {
     door.setKeyScale(state.keyScale);
     door.plug.rotation.x = state.turn;
     door.pivot.rotation.y = state.open;
+    // The dissolve reads points in the door's own space, from the door's current place.
+    door.group.updateMatrixWorld(true);
+    leafMatrix.value.copy(door.leaf.matrixWorld);
+    leafInverse.value.copy(door.leaf.matrixWorld).invert();
+    // The dissolve follows the scroll more slowly than the rest, so the door breaks up
+    // over a couple of seconds rather than in a single notch of the wheel.
+    dissolve = THREE.MathUtils.damp(dissolve, state.dissolve, reducedMotion ? 20 : 0.9, dt);
+    dissolveProgress.value = dissolve;
+    setBuild(state.build);
     door.setReveal(state.door);
     door.setGlow(state.glow);
     // The halo is kept for the light behind the door: on the dense particle key it burns to white.
@@ -205,6 +255,12 @@ async function start(): Promise<void> {
       camera.updateProjectionMatrix();
     }
     cameraAt(story, distanceScale, camera.position, lookTarget);
+    // Entering the Terrain: the camera moves through the doorway while the light comes up.
+    const push = epilogue.push;
+    if (push > 0) {
+      camera.position.lerp(DOORWAY_EYE, push);
+      lookTarget.lerp(DOORWAY_LOOK, push);
+    }
     camera.lookAt(lookTarget);
 
     if (pointerActive && state.flow === 0) {
@@ -218,16 +274,7 @@ async function start(): Promise<void> {
     particles.delta.value = dt;
     renderer.compute(particles.update);
     draw();
-
-    monitor.sample(timer.getDelta());
-    statsTime += timer.getDelta();
-    statsFrames++;
-    if (statsTime >= 0.5) {
-      const fps = Math.round(statsFrames / statsTime);
-      statsLabel.textContent = `${fps} i/s · ${formatNumber(particles.object.count)} particules · ${monitor.current}`;
-      if (import.meta.env.DEV) Object.assign(window, { __lab: { fps, backend: backendName, tier: monitor.current, count: particles.object.count, story } });
-      statsTime = statsFrames = 0;
-    }
+    sampleFrame();
   });
 
   await loader.finish();

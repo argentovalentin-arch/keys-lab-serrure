@@ -19,12 +19,12 @@ const NAVY = '#0e1726';
 
 const CHAPTERS: Chapter[] = [
   { title: 'Tout est là.', lead: 'Rien n’est encore à sa place.' },
-  { title: 'Vous la reconnaissez ?', lead: 'Elle était là depuis le début.' },
+  { title: 'Vous la reconnaissez ?', lead: 'Elle était là depuis le début.' },
   { title: 'Plus qu’une idée', lead: 'Elle prend du poids.' },
-  { title: 'Il fallait cette clé-là', lead: 'Aucune autre n’aurait tourné.' },
+  { title: 'Il fallait cette clé-là', lead: 'Elle seule pouvait ouvrir la serrure.' },
   {
-    title: 'Chaque entreprise a sa clé',
-    lead: 'Keys Performance vous aide à la trouver.',
+    title: 'Chaque entreprise a sa clé', // the subject held together on its line
+    lead: 'Keys Performance vous aide à trouver la vôtre.',
     // One button, on every quality tier: it goes through the door, into the Terrain
     // (which takes its particle count from the tier); the site comes at the end of it.
     action: 'Entrer pour découvrir Keys Performance',
@@ -176,6 +176,12 @@ async function start(): Promise<void> {
 
   const timer = new THREE.Timer();
   let story = 0;
+  let storySpeed = 0;
+  // Touch screens (see .track in style.css): chapters per second at most, in either direction.
+  const touchQuery = window.matchMedia('(pointer: coarse)');
+  let touchPacing = touchQuery.matches;
+  touchQuery.addEventListener('change', () => (touchPacing = touchQuery.matches));
+  const TOUCH_PACE = 0.6;
   let dissolve = -1;
   let distanceScale = 1;
   let statsTime = 0;
@@ -205,8 +211,16 @@ async function start(): Promise<void> {
     }
 
     const progress = scrollProgress();
-    // The story moves a little behind the scroll, so a flick of the wheel still reads as a transition.
-    story = THREE.MathUtils.damp(story, progress * STORY_END, reducedMotion ? 20 : 7, dt);
+    if (touchPacing && !reducedMotion) {
+      // On touch screens a swipe lands on the next chapter at once (scroll snapping): the
+      // story follows at a readable pace, easing in and out, so each transformation is seen.
+      const wanted = THREE.MathUtils.clamp((progress * STORY_END - story) * 3, -TOUCH_PACE, TOUCH_PACE);
+      storySpeed = THREE.MathUtils.damp(storySpeed, wanted, 5, dt);
+      story = THREE.MathUtils.clamp(story + storySpeed * dt, 0, STORY_END);
+    } else {
+      // The story moves a little behind the scroll, so a flick of the wheel still reads as a transition.
+      story = THREE.MathUtils.damp(story, progress * STORY_END, reducedMotion ? 20 : 7, dt);
+    }
     stage.show(Math.min(CHAPTERS.length - 1, Math.round(story)));
     scrollHint.classList.toggle('is-hidden', progress > 0.02);
 
@@ -222,7 +236,8 @@ async function start(): Promise<void> {
     // The particle key travels into the lock with the metal one, and is cut where the metal begins.
     particles.object.position.x = state.flow ? 0 : state.insert;
     key.setSolid(state.solid);
-    particles.cut.value = state.flow ? 100 : key.front.value;
+    // No cut before the metal starts forming: the cloud moves freely, with no edge on the right.
+    particles.cut.value = state.flow || state.solid <= 0 ? 100 : key.front.value;
 
     key.mesh.position.x = state.insert;
     key.mesh.rotation.x = state.turn;

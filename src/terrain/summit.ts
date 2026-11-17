@@ -282,16 +282,24 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
       // Where the ring is: at the top, then taken in hand (camera space), carried across, lowered.
       const take = smooth(s, moments.hand, moments.hand + 1.3);
       const across = smooth(s, moments.sway[0], moments.sway[1]);
-      const handX = THREE.MathUtils.lerp(-HAND_SWAY, HAND_SWAY, across);
+      // On a narrow (portrait) screen the hand carries it less far, so it stays in view.
+      const fov = THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov ?? 50);
+      const halfWidth = Math.tan(fov / 2) * -HAND.z * ((camera as THREE.PerspectiveCamera).aspect ?? 1);
+      // And held a little smaller, so the hanging keys are not cut by the screen's edges.
+      // Landscape screens (computers) keep the movement as it was designed.
+      const aspect = (camera as THREE.PerspectiveCamera).aspect ?? 1;
+      const sway = aspect >= 1 ? HAND_SWAY : Math.min(HAND_SWAY, halfWidth * 0.3);
+      const handScale = HAND_SCALE * Math.min(1, 0.5 + 0.5 * aspect);
+      const handX = THREE.MathUtils.lerp(-sway, sway, across);
       const lift = Math.sin(across * Math.PI) * 0.18; // carried in a slight arc
       const lowered = smooth(s, moments.lower[0], moments.lower[1]);
       camera.updateMatrixWorld();
-      handPos.set(THREE.MathUtils.lerp(0, -HAND_SWAY, take) + (across > 0 ? handX + HAND_SWAY : 0), HAND.y + lift - lowered * 1.6, HAND.z);
+      handPos.set(THREE.MathUtils.lerp(0, -sway, take) + (across > 0 ? handX + sway : 0), HAND.y + lift - lowered * 1.6, HAND.z);
       camera.localToWorld(handPos);
       camera.getWorldQuaternion(handQuat);
       bunch.position.lerpVectors(ringCentre, handPos, take);
       bunch.quaternion.slerpQuaternions(atTop, handQuat, take);
-      bunch.scale.setScalar(THREE.MathUtils.lerp(1, HAND_SCALE, take));
+      bunch.scale.setScalar(THREE.MathUtils.lerp(1, handScale, take));
       // What drives the keys' swing: the hand's sideways acceleration, and the camera turning.
       const handSpeed = dt > 0 ? (handX - lastHandX) / dt : 0;
       const handAccel = dt > 0 ? (handSpeed - lastHandSpeed) / dt : 0;

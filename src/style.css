@@ -28,7 +28,27 @@ html, body {
 }
 
 /* One chapter = 300px of scroll: about three notches of a mouse wheel. Four transitions. */
-.track { height: calc(300px * 4 + 100vh); }
+.track {
+  --chapter: 300px;
+  position: relative;
+  height: calc(var(--chapter) * 4 + 100vh);
+}
+.track__stop {
+  position: absolute;
+  left: 0;
+  top: calc(var(--chapter) * var(--i));
+  width: 1px;
+  height: 1px;
+}
+
+/* Touch screens: one chapter = one screen, and each swipe settles on the next chapter
+   (a flick would otherwise run through several at once). The story then plays the
+   transition at a readable pace (see main.ts). Not in the Terrain, which has its own scroll. */
+@media (pointer: coarse) {
+  .track { --chapter: 100svh; height: calc(var(--chapter) * 4 + 100svh); }
+  html:not(.is-terrain) { scroll-snap-type: y mandatory; }
+  .track__stop { scroll-snap-align: start; scroll-snap-stop: always; }
+}
 
 .sr-only {
   position: absolute;
@@ -76,7 +96,7 @@ html, body {
   left: var(--gutter);
   bottom: clamp(32px, 8vh, 80px);
   z-index: 2;
-  max-width: 32rem;
+  max-width: calc(100vw - 2 * var(--gutter));
   pointer-events: none;
 }
 
@@ -84,6 +104,17 @@ html, body {
   transition: opacity 0.28s ease, transform 0.28s ease;
   /* Keeps the text readable over the light of the last chapter. */
   text-shadow: 0 1px 18px rgba(5, 9, 17, 0.55);
+}
+
+/* A soft shade behind the text, unseen on the dark scenes: over the light of the open
+   door (last chapter), it keeps the cream title readable. */
+.stage::before {
+  content: '';
+  position: absolute;
+  inset: -56px -72px -40px -72px;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(5, 9, 17, 0.6), rgba(5, 9, 17, 0.3) 60%, transparent);
+  pointer-events: none;
 }
 
 .stage.is-hidden {
@@ -95,12 +126,20 @@ html, body {
   margin: 0;
   font-family: var(--serif);
   font-weight: 400;
-  font-size: clamp(2.4rem, 7vw, 5rem);
+  /* Smaller on the narrowest phones, and on short screens (phones held sideways). */
+  font-size: clamp(min(2.4rem, 10vw), min(7vw, 11vh), 5rem);
   line-height: 1;
+  /* A measure set in the title's own size, so each title breaks the same way at every
+     screen width: « Chaque entreprise » holds on one line, longer titles go on two,
+     balanced, with no word or punctuation left alone. */
+  max-width: 8.8em;
+  text-wrap: balance;
 }
 
 .stage__lead {
   margin: 12px 0 0;
+  max-width: 32rem;
+  text-wrap: pretty;
   color: var(--cream-soft);
 }
 
@@ -508,3 +547,6 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 @media (max-width: 600px) {
   .hud__stats { display: none; }
 }
+
+/* Terrain texts that may wrap (narrow screens): even lines, no word left alone. */
+.terrain-ui__message, .terrain-ui__note, .terrain-ui__hint, .terrain-ui__caption { text-wrap: balance; }

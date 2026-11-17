@@ -28,8 +28,8 @@
     </div>
 
     <p class="sr-only">
-      Expérience visuelle animée, au fil du défilement de la page : des particules désordonnées s’organisent en grille,
-      puis forment une clé. La clé devient métal, entre dans une serrure et tourne ; la porte s’ouvre sur la lumière.
+      Expérience visuelle animée, au fil du défilement de la page : des particules désordonnées s’organisent en grille,
+      puis forment une clé. La clé devient métal, entre dans une serrure et tourne ; la porte s’ouvre sur la lumière.
     </p>
 
     <header class="hud">
@@ -60,7 +60,7 @@
       <div class="terrain-tags" id="terrain-tags" aria-hidden="true"></div>
       <p class="terrain-ui__note" id="terrain-note" aria-live="polite"></p>
       <p class="terrain-ui__hint" id="terrain-hint">
-        Guidez la lumière vers la gauche ou la droite : pointeur, glissement du doigt ou flèches du clavier.
+        Guidez la lumière vers la gauche ou la droite : pointeur, glissement du doigt ou flèches du clavier.
       </p>
       <div class="terrain-ui__end" id="terrain-end" hidden>
         <p class="terrain-ui__caption">Votre courbe de croissance, tracée par votre parcours.</p>
@@ -79,7 +79,14 @@
       Votre navigateur ne permet pas d’afficher cette expérience (ni WebGPU, ni WebGL 2).
     </p>
 
-    <div class="track" aria-hidden="true"></div>
+    <!-- The scroll that drives the story; one stop per chapter (touch screens snap to them). -->
+    <div class="track" aria-hidden="true">
+      <span class="track__stop" style="--i: 0"></span>
+      <span class="track__stop" style="--i: 1"></span>
+      <span class="track__stop" style="--i: 2"></span>
+      <span class="track__stop" style="--i: 3"></span>
+      <span class="track__stop" style="--i: 4"></span>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -5,6 +5,8 @@ import type { Landmark } from '../terrain/path';
 import { ICONS } from '../terrain/icons';
 
 type Mode = 'story' | 'entering' | 'terrain' | 'leaving';
+/** A box on screen, in CSS pixels. */
+type Box = { left: number; right: number; top: number; bottom: number };
 
 const VEIL_MS = 950; // a little over the .veil transition in style.css
 const PUSH_SECONDS = 1.1;
@@ -20,6 +22,8 @@ export interface EpilogueOptions {
   trigger: HTMLButtonElement;
   /** Field particles for the Terrain, read when entering (the quality tier may have changed). */
   fieldCount: () => number;
+  /** Told when the Terrain takes over the screen (true) and when the story is back (false). */
+  onTerrainChange?: (inside: boolean) => void;
 }
 
 /**
@@ -43,8 +47,13 @@ export class Epilogue {
   private readonly wordName = document.querySelector<HTMLElement>('#terrain-word-name')!;
   private readonly note = document.querySelector<HTMLElement>('#terrain-note')!;
   private readonly tagLayer = document.querySelector<HTMLElement>('#terrain-tags')!;
-  private readonly tagElements = new Map<string, { root: HTMLElement; thread: HTMLElement; label: HTMLElement }>();
+  private readonly tagElements = new Map<string, { root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number }>();
   private noteText: string | null = null;
+  // Sizes read from the page once, not every frame: reading layout right after moving
+  // elements forces the browser to lay the page out again, several times a frame.
+  private noteSize: { width: number; height: number } | null = null;
+  private noteBox: Box | null = null;
+  private wordBoxes: Box[] | null = null;
   private readonly close = document.querySelector<HTMLButtonElement>('#terrain-close')!;
   private readonly end = document.querySelector<HTMLElement>('#terrain-end')!;
   private readonly replay = document.querySelector<HTMLButtonElement>('#terrain-replay')!;
@@ -59,6 +68,11 @@ export class Epilogue {
       this.end.hidden = true;
       this.terrain?.restart();
       this.close.focus();
+    });
+    window.addEventListener('resize', () => {
+      this.noteSize = null;
+      this.wordBoxes = null;
+      for (const element of this.tagElements.values()) element.width = element.height = -1;
     });
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.mode === 'terrain') void this.leave();
@@ -92,6 +106,7 @@ export class Epilogue {
     this.pushStart = performance.now();
     this.veil.classList.remove('is-dark', 'is-slow');
     this.veil.classList.add('is-on');
+    this.options.onTerrainChange?.(true);
 
     try {
       // The module and its shaders load while the light covers the screen.
@@ -164,10 +179,12 @@ export class Epilogue {
         Object.assign(document.createElement('span'), { className: 'terrain-ui__dot', textContent: '.', ariaHidden: 'true' }),
       );
       this.word.classList.remove('is-hidden');
+      this.wordBoxes = null;
       // The welcome message makes way if a landmark comes up while it still shows.
       this.message.classList.add('is-hidden');
     } else {
       this.word.classList.add('is-hidden');
+      this.wordBoxes = null;
     }
   }
 
@@ -178,16 +195,19 @@ export class Epilogue {
   private showNote(view: NoteView | null): void {
     if (!view) {
       this.note.style.opacity = '0';
+      this.noteBox = null;
       return;
     }
     if (view.note.text !== this.noteText) {
       this.noteText = view.note.text;
       this.note.replaceChildren(...noteNodes(view.note.text));
+      this.noteSize = null;
     }
+    if (!this.noteSize) this.noteSize = { width: this.note.offsetWidth, height: this.note.offsetHeight };
     let x = ((view.x + 1) / 2) * window.innerWidth;
     const y = ((1 - view.y) / 2) * window.innerHeight;
     // In the bends the anchor can come near the edge: the text is kept whole on screen.
-    const width = this.note.offsetWidth * view.scale;
+    const width = this.noteSize.width * view.scale;
     const margin = Math.min(48, window.innerWidth * 0.05);
     const [minX, maxX] = view.align === -1
       ? [margin + width, window.innerWidth - margin]
@@ -201,6 +221,10 @@ export class Epilogue {
     this.note.style.transformOrigin = view.align === -1 ? 'right center' : view.align === 1 ? 'left center' : 'center';
     this.note.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(${shift}, -50%) scale(${view.scale.toFixed(3)})`;
     this.note.style.opacity = view.opacity.toFixed(3);
+    // Where it stands on screen, for the labels to keep clear of (see showTags).
+    const left = x - (view.align === -1 ? width : view.align === 1 ? 0 : width / 2);
+    const height = this.noteSize.height * view.scale;
+    this.noteBox = view.opacity > 0.05 ? { left: left - 12, right: left + width + 12, top: y - height / 2 - 10, bottom: y + height / 2 + 10 } : null;
   }
 
   /**
@@ -215,16 +239,16 @@ export class Epilogue {
     const h = window.innerHeight;
     // What labels must stay clear of: the landmark's title and the note, when they show,
     // then the labels already placed this frame (screen boxes).
-    type Box = { left: number; right: number; top: number; bottom: number };
     const placed: Box[] = [];
-    const keepClear = (element: HTMLElement, shown: boolean) => {
-      if (!shown) return;
-      const r = element.getBoundingClientRect();
-      if (r.width > 0) placed.push({ left: r.left - 12, right: r.right + 12, top: r.top - 10, bottom: r.bottom + 10 });
-    };
-    keepClear(this.wordName, !this.word.classList.contains('is-hidden'));
-    keepClear(this.wordStep.parentElement!, !this.word.classList.contains('is-hidden'));
-    keepClear(this.note, parseFloat(this.note.style.opacity || '0') > 0.05);
+    if (views.length && !this.word.classList.contains('is-hidden')) {
+      // The title stays put while it shows: measured once.
+      this.wordBoxes ??= [this.wordName, this.wordStep.parentElement!].map((element) => {
+        const r = element.getBoundingClientRect();
+        return { left: r.left - 12, right: r.right + 12, top: r.top - 10, bottom: r.bottom + 10 };
+      }).filter((box) => box.right - box.left > 24);
+      placed.push(...this.wordBoxes);
+    }
+    if (this.noteBox) placed.push(this.noteBox);
     // Nearest first (lowest on screen), so the farther ones are the ones moved up.
     const ordered = [...views].sort((p, q) => q.ly - p.ly);
     for (const view of ordered) {
@@ -247,20 +271,24 @@ export class Epilogue {
         label.append(badge, caption);
         root.append(thread, label);
         this.tagLayer.append(root);
-        element = { root, thread, label };
+        element = { root, thread, label, width: -1, height: -1 };
         this.tagElements.set(view.id, element);
+      }
+      if (element.width < 0) {
+        element.width = element.label.offsetWidth;
+        element.height = element.label.offsetHeight;
       }
       const gx = ((view.gx + 1) / 2) * w;
       const gy = ((1 - view.gy) / 2) * h;
       // The name is kept whole on screen; the thread still reaches its point.
-      const half = element.label.offsetWidth / 2;
+      const half = element.width / 2;
       const margin = 16;
       const lx = Math.min(Math.max(((view.lx + 1) / 2) * w, margin + half), w - margin - half);
       let ly = ((1 - view.ly) / 2) * h;
       // Nothing is covered: a label that would overlap the title, the note or another label
       // moves just clear of it, above or below, whichever is nearer and free (its thread
       // still reaches its point).
-      const height = element.label.offsetHeight + 4;
+      const height = element.height + 4;
       const hits = (y: number) => placed.find((r) => lx - half < r.right && lx + half > r.left && y - height < r.bottom && y > r.top);
       for (let pass = 0; pass < 6; pass++) {
         const hit = hits(ly);
@@ -299,9 +327,11 @@ export class Epilogue {
   }
 
   private restoreStory(): void {
+    this.options.onTerrainChange?.(false);
     this.ui.hidden = true;
     this.showNote(null);
     this.noteText = null;
+    this.wordBoxes = null;
     this.showTags([]);
     this.end.hidden = true;
     document.documentElement.classList.remove('is-terrain');

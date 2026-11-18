@@ -241,7 +241,8 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
    apart from the notes, which are smaller, in the scene, with an italic word. */
 .terrain-ui__word {
   position: absolute;
-  top: 16vh;
+  /* Always below the « Quitter le Terrain » button, even on short phone screens. */
+  top: max(16vh, 124px);
   left: var(--gutter);
   right: var(--gutter);
   margin: 0;
@@ -550,3 +551,20 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 
 /* Terrain texts that may wrap (narrow screens): even lines, no word left alone. */
 .terrain-ui__message, .terrain-ui__note, .terrain-ui__hint, .terrain-ui__caption { text-wrap: balance; }
+
+/* The Terrain's words over bright light (beacons, the summit's column): a soft shade
+   behind them, unseen on the dark ground, keeps them readable. */
+.terrain-ui__word::before, .terrain-ui__note::before {
+  content: '';
+  position: absolute;
+  inset: -28px -48px;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(5, 9, 17, 0.55), rgba(5, 9, 17, 0.25) 60%, transparent);
+  pointer-events: none;
+}
+
+/* On a phone, once the curve and its choices show, « Quitter » makes way for the chart
+   (« Revenir au récit » does the same). */
+@media (max-width: 700px) {
+  .terrain-ui:has(.terrain-ui__end:not([hidden])) .terrain-ui__close { opacity: 0; pointer-events: none; }
+}

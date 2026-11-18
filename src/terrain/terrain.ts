@@ -12,6 +12,7 @@ import { createWalls } from './walls';
 import { noteAt, noteStretch, type Note, type NoteTopic } from './notes';
 import { MONITOR_MARKS, createMonitor } from './monitor';
 import { createSummit } from './summit';
+import { SPRITE_GROWTH, coreColor, particleShape, twinkle } from '../world/sprite';
 import type { IconName } from './icons';
 
 /** A note as it stands on screen this frame (see notes.ts and placeNote). */
@@ -308,11 +309,15 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   // The lane reads a touch warmer than the field; lit stretches and the crest glow.
   const warmth = crest.mul(0.35).add(lane.mul(0.25)).add(energy.mul(0.8)).add(opened.mul(0.3)).add(scan.mul(0.7)).min(1);
   // The sweep (« Comprendre avant de proposer ») lights the particles it passes, and swells them.
-  fieldMaterial.colorNode = mix(color(CREAM), color(WARM), warmth).mul(float(1).add(scan.mul(2.2)));
+  // Points of light (sprite.ts): a whiter core in a faint halo, a slow shimmer off the lane.
+  const shape = particleShape();
+  const fieldSeed = hash(instanceIndex.add(uint(count * 2)));
+  fieldMaterial.colorNode = coreColor(mix(color(CREAM), color(WARM), warmth), shape.core).mul(float(1).add(scan.mul(2.2)));
   const disc = clamp(float(1).sub(length(uv().sub(0.5)).mul(2)), 0, 1);
   const glow = float(1).add(lane.mul(0.25)).add(energy.mul(1.2)).add(arrival.mul(0.7)).add(contour.mul(0.9)).add(scan.mul(2.2));
-  fieldMaterial.opacityNode = disc.mul(disc).mul(0.6).mul(haze).mul(near).mul(glow).min(1).mul(fieldShown);
-  fieldMaterial.scaleNode = float(0.045).add(hash(instanceIndex.add(uint(count * 2))).pow(5).mul(0.08)).mul(scan.mul(1.3).add(1));
+  const fieldShimmer = mix(twinkle(time, fieldSeed, 0.3), 1, lane);
+  fieldMaterial.opacityNode = shape.alpha.mul(0.62).mul(haze).mul(near).mul(glow).mul(fieldShimmer).min(1).mul(fieldShown);
+  fieldMaterial.scaleNode = float(0.045).add(fieldSeed.pow(5).mul(0.08)).mul(scan.mul(1.3).add(1)).mul(SPRITE_GROWTH);
   const field = new THREE.Sprite(fieldMaterial);
   field.count = count;
   field.frustumCulled = false;
@@ -324,13 +329,16 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
-  const band = uv().y.sub(0.5).mul(9);
+  // Thinner on a portrait phone, where the same band fills far more of the screen.
+  const bandSharpness = uniform(9);
+  const band = uv().y.sub(0.5).mul(bandSharpness);
   // « Performer »: past the crest, the horizon rises and brightens.
   const rise = uniform(0);
   horizonMaterial.colorNode = color(WARM).mul(rise.mul(0.35).add(0.55));
   const horizonShown = uniform(1);
+  const horizonCalm = uniform(1);
   horizonMaterial.opacityNode = exp(band.mul(band).negate()).mul(smoothstep(0, 0.25, uv().x)).mul(smoothstep(1, 0.75, uv().x))
-    .mul(horizonShown);
+    .mul(horizonShown).mul(horizonCalm);
   const horizon = new THREE.Mesh(new THREE.PlaneGeometry(260, 24), horizonMaterial);
   scene.add(horizon);
 
@@ -665,6 +673,10 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
 
   const frame = (dt: number) => {
     elapsed += dt;
+    // Portrait phone screens: the same light takes up far more of the screen there, and
+    // overlaps the words. Beacons, horizon and glow are toned down, the gate comes later.
+    const narrow = camera.aspect < 0.9;
+    const calm = narrow ? 0.55 : 1;
     // A little faster after each landmark, eased in; at the end, a glide to a stop.
     const passed = LANDMARKS.filter((landmark) => distance >= landmark.at).length;
     if (endedAt === null && distance >= END_AT) startReward();
@@ -682,7 +694,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     for (const beacon of beacons) {
       const left = beacon.at - distance;
       beacon.fade.value = Math.max(
-        smooth(left, 3, 14) * (1 - smooth(left, FIELD_DEPTH * 0.4, FIELD_DEPTH * 0.6)),
+        smooth(left, 3, 14) * (1 - smooth(left, FIELD_DEPTH * 0.4, FIELD_DEPTH * 0.6)) * calm,
         lookingBack * 0.75,
       );
     }
@@ -711,11 +723,15 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     // « Performer »: the ring shows from afar and fades as it is crossed; a swell of
     // light on crossing; then the horizon rises.
     const toRing = PERFORM_AT - distance;
-    ringFade.value = smooth(toRing, -1.5, 2) * (1 - smooth(toRing, FIELD_DEPTH * 0.45, FIELD_DEPTH * 0.65));
+    // On a phone it only comes once « Mesurer pour décider » has gone, not over it.
+    const [ringNear, ringFar] = narrow ? [FIELD_DEPTH * 0.12, FIELD_DEPTH * 0.22] : [FIELD_DEPTH * 0.45, FIELD_DEPTH * 0.65];
+    ringFade.value = smooth(toRing, -1.5, 2) * (1 - smooth(toRing, ringNear, ringFar)) * (narrow ? 0.7 : 1);
     arrival.value = smooth(distance, PERFORM_AT - 1, PERFORM_AT + 0.5) * (1 - smooth(distance, PERFORM_AT + 1, PERFORM_AT + 16));
     // Arriving on the summit, the light swells once more.
     const arriving = endedAt === null ? 0 : Math.exp(-(((elapsed - endedAt - 0.6) / 0.7) ** 2));
-    glowPass.strength.value = 0.6 + arrival.value * 0.9 + arriving * 0.4;
+    glowPass.strength.value = (0.6 + arrival.value * 0.9 + arriving * 0.4) * (narrow ? 0.5 : 1);
+    horizonCalm.value = narrow ? 0.45 : 1;
+    bandSharpness.value = narrow ? 15 : 9;
     rise.value = smooth(distance, PERFORM_AT - 4, PERFORM_AT + 22);
 
     // One word at a time, over a stretch of path around its landmark.
@@ -937,12 +953,28 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   };
 
   // Settle positions, then compile everything while the light still covers the screen.
+  // Most of the Terrain is hidden at the start (dials, levers, monitor, summit, curve…):
+  // drawn for the first time mid-ride, each would stop the frame while its shaders are
+  // built, the jolts felt along the way. So for this one warm-up, everything is drawn,
+  // through the same passes as the ride, then put back as it was.
   frame(0);
+  const warmed: { object: THREE.Object3D; visible: boolean; culled: boolean }[] = [];
+  scene.traverse((object) => {
+    warmed.push({ object, visible: object.visible, culled: object.frustumCulled });
+    object.visible = true;
+    object.frustumCulled = false;
+  });
   render();
   await Promise.race([
     renderer.compileAsync(scene, camera),
     new Promise((resolve) => window.setTimeout(resolve, 4000)),
   ]);
+  for (const { object, visible, culled } of warmed) {
+    object.visible = visible;
+    object.frustumCulled = culled;
+  }
+  frame(0);
+  render();
 
   return {
     frame,

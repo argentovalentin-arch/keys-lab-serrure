@@ -6,6 +6,7 @@ import {
 import { chaosLayout, keyLayout } from './shapes';
 import { DOOR_X, LEAF } from './door';
 import { PARTICLE_LIFE, dissolveField, dissolveProgress, leafMatrix } from './dissolve';
+import { SPRITE_GROWTH, coreColor, particleShape, twinkle } from './sprite';
 
 const CHAOS_RADIUS = 4.5;
 // Door particles stay in the door's own zone: beyond the wall's back face (so never in
@@ -160,11 +161,20 @@ export function createParticles(count: number) {
   const speed = length(velocities.toAttribute());
   const shapeColor = mix(color('#f4ecdc'), color('#e3a35a'), smoothstep(0.4, 3, speed));
   const doorColor = mix(color('#c98a45'), color('#1c2a44'), smoothstep(0, 0.5, age));
-  material.colorNode = mix(shapeColor, doorColor, flow);
+  // Points of light (sprite.ts): a whiter core in a faint halo.
+  // Far in the cloud they cool towards the night's blue, near they stay cream: depth.
+  const shape = particleShape();
+  const nearness = smoothstep(-CHAOS_RADIUS, CHAOS_RADIUS * 0.6, positions.toAttribute().z);
+  const depthTint = mix(vec3(0.72, 0.8, 0.95), vec3(1, 1, 1), nearness);
+  material.colorNode = mix(coreColor(shapeColor.mul(depthTint), shape.core), doorColor, flow);
 
-  // A soft disc, dimmer at the back for depth. The key is dense, so it is drawn
-  // fainter, otherwise the additive blend burns it to flat white.
-  const disc = clamp(float(1).sub(length(uv().sub(0.5)).mul(2)), 0, 1);
+  // Dimmer at the back for depth. The key is dense, so it is drawn fainter, otherwise
+  // the additive blend burns it to flat white. Loose in the cloud, each particle shimmers
+  // a little; settled in the key, it holds still.
+  const grainSeed = hash(instanceIndex.add(uint(count * 4)));
+  // The door's flakes keep their plain soft disc: they read as pieces of door, not light.
+  const flake = clamp(float(1).sub(length(uv().sub(0.5)).mul(2)), 0, 1);
+  const shimmer = mix(twinkle(time, grainSeed), 1, smoothstep(1.2, 2, morph).max(flow));
   const depth = mix(mix(0.35, 1, smoothstep(-CHAOS_RADIUS, CHAOS_RADIUS, drawn.z)), 1, flow);
   const density = mix(mix(1, 0.35, smoothstep(1, 2, morph)), 1, flow);
   // Off the door, a particle shows only once released, then fades out as it drifts.
@@ -174,15 +184,15 @@ export function createParticles(count: number) {
   // Door flakes are drawn with normal blending against the light: a little more opaque.
   const doorOpacity = mix(1, 1.8, flow);
   material.opacityNode = min(
-    disc.mul(disc).mul(0.5).mul(depth).mul(density).mul(brightness).mul(lane).mul(visibility).mul(beforeCut)
-      .mul(doorOpacity),
+    mix(shape.alpha.mul(0.62), flake.mul(flake).mul(0.5), flow).mul(depth).mul(density).mul(brightness).mul(lane).mul(visibility).mul(beforeCut)
+      .mul(doorOpacity).mul(shimmer),
     1,
   );
 
   // Most particles are fine dust; a few are larger, which gives the cloud some grain.
   // Off the door, they are flakes, a little larger, to read against the light.
-  const grain = hash(instanceIndex.add(uint(count * 4)));
-  material.scaleNode = float(0.02).add(pow(grain, 6).mul(0.06)).mul(mix(1, 2.2, flow));
+  const grain = grainSeed;
+  material.scaleNode = float(0.02).add(pow(grain, 6).mul(0.06)).mul(mix(SPRITE_GROWTH, 2.2, flow));
 
   const sprite = new THREE.Sprite(material);
   sprite.count = count;

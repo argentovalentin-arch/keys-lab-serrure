@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { SPRITE_GROWTH, coreColor, particleShape } from '../world/sprite';
 import {
   attribute, clamp, color, cos, float, hash, instanceIndex, length, mix, positionLocal, sin, smoothstep, uint, uniform, uv, vec3,
 } from 'three/tsl';
@@ -73,16 +74,17 @@ export function createRelief(scene: THREE.Scene, count: number) {
   // eye reads the rings as lying further and further down rather than on one flat plane.
   const drop = float(SUMMIT_HEIGHT).sub(isLane.select(laneY, mountainY)).div(SUMMIT_HEIGHT).clamp(0, 1);
   const haze = drop.mul(clamp(depth.sub(1).mul(1.5), 0, 1));
-  material.colorNode = mix(mix(color(CREAM), color(WARM), isLane.select(float(0.6), float(0))), color(LOW), haze.mul(0.55));
+  const shape = particleShape();
+  material.colorNode = coreColor(mix(mix(color(CREAM), color(WARM), isLane.select(float(0.6), float(0))), color(LOW), haze.mul(0.55)), shape.core);
   const disc = clamp(float(1).sub(length(uv().sub(0.5)).mul(2)), 0, 1);
   // The lane fades over its last stretch, right under the camera on the summit, where
   // close-up particles would blot out the view rather than draw the route.
   const laneFade = float(1).sub(smoothstep(END_AT - 45, END_AT - 12, p)).max(0.15);
   const strength = isLane.select(laneFade.mul(0.85), onContour.select(float(1), float(0.25)));
-  material.opacityNode = disc.mul(disc).mul(strength).mul(float(1).sub(haze.mul(isLane.select(float(0.2), float(0.35))))).mul(shown);
+  material.opacityNode = shape.alpha.mul(strength).mul(float(1).sub(haze.mul(isLane.select(float(0.2), float(0.35))))).mul(shown);
   // Seen from far up the mountain, the particles need to be larger than underfoot; the
   // contour lines most of all, as they draw the mountain's shape from a distance.
-  material.scaleNode = isLane.select(float(0.16), onContour.select(float(0.24), float(0.13))).add(seedC.pow(6).mul(0.12));
+  material.scaleNode = isLane.select(float(0.16), onContour.select(float(0.24), float(0.13))).add(seedC.pow(6).mul(0.12)).mul(SPRITE_GROWTH);
   const points = new THREE.Sprite(material);
   points.count = count;
   points.frustumCulled = false;

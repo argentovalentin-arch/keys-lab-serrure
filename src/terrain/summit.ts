@@ -276,7 +276,9 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
       waveRadius.value = 3 + 46 * (1 - (1 - w) ** 2);
       wave.scale.setScalar(waveRadius.value);
       waveFade.value = on ? (1 - w) * smooth(s, 0, 0.15) : 0;
-      beamFade.value = on ? smooth(s, 0.1, 0.8) * (1 - 0.8 * smooth(s, 1.4, noteAt)) * gone.value : 0;
+      // On a portrait phone the column takes a much larger share of the screen: fainter.
+      const beamCalm = ((camera as THREE.PerspectiveCamera).aspect ?? 1) < 0.9 ? 0.35 : 1;
+      beamFade.value = on ? smooth(s, 0.1, 0.8) * (1 - 0.8 * smooth(s, 1.4, noteAt)) * gone.value * beamCalm : 0;
       beam.rotation.y = Math.atan2(camera.position.x - beam.position.x, camera.position.z - beam.position.z);
 
       // Where the ring is: at the top, then taken in hand (camera space), carried across, lowered.

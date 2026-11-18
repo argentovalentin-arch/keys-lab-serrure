@@ -110,8 +110,13 @@ async function start(): Promise<void> {
   };
   applyCount(particles.capacity);
 
+  // In the Terrain the screen fills with additive light (field, beams, bloom): drawn at a
+  // slightly lower resolution there, it keeps its frame rate on Retina and phone screens.
+  let pixelCap = Infinity;
+  const applyPixelRatio = (current: Tier) =>
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, TIERS[current].pixelRatio, pixelCap));
   const applyTier = (next: Tier) => {
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, TIERS[next].pixelRatio));
+    applyPixelRatio(next);
     drawSize.set(0, 0); // forces the canvas to be resized on the next frame
     applyCount(TIERS[next].particles);
     useBloom = next !== 'low';
@@ -150,6 +155,11 @@ async function start(): Promise<void> {
     lenis,
     trigger: stage.action,
     fieldCount: () => Math.round(TIERS[monitor.current].particles * 0.45),
+    onTerrainChange: (inside) => {
+      pixelCap = inside ? (window.matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5) : Infinity;
+      applyPixelRatio(monitor.current);
+      drawSize.set(0, 0);
+    },
   });
 
   // Pointer, projected on the z = 0 plane then moved into the particles' local space.

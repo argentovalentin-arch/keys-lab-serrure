@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   atan, attribute, clamp, color, cos, exp, float, hash, instanceIndex, length, mix, mx_noise_float, pass, sin,
-  smoothstep, uint, uniform, uv, vec3,
+  smoothstep, uint, uniform, uv, vec2, vec3,
 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { createSteering } from './steering';
@@ -12,6 +12,7 @@ import { createWalls } from './walls';
 import { noteAt, noteStretch, type Note, type NoteTopic } from './notes';
 import { MONITOR_MARKS, createMonitor } from './monitor';
 import { createSummit } from './summit';
+import { BEACON, CHART, LEVERS, LEVER_FOCUS, SPEED, WORD, lookWeights, paceAt } from './pace';
 import { SPRITE_GROWTH, coreColor, particleShape, twinkle } from '../world/sprite';
 import type { IconName } from './icons';
 
@@ -77,7 +78,6 @@ const FIELD_WIDTH = 34;
 const FIELD_DEPTH = 64;
 /** How far the band reaches behind the guide, so the ground runs under the camera. */
 const FIELD_BEHIND = 9;
-const SPEED = 7.2; // units per second along the path
 // The light can be steered across the path, never off it.
 const LATERAL_LIMIT = PATH_HALF - 0.35;
 const CAMERA_BACK = 6.5;
@@ -88,16 +88,7 @@ const TRAIL_VISIBLE = 220; // most recent points drawn as the ribbon
 const TRAIL_WIDTH = 0.018; // half-width at the guide; the ribbon tapers to a thread behind it
 const FIREFLIES = 16;
 
-/**
- * Cruising speed on each stretch, as a share of SPEED: before « Structurer », then up to
- * « Activer », then up to « Performer », then the glide on the summit. A little slower over
- * the two stretches between landmarks, where two notes each are read and illustrated in
- * the scene (labels popping up, walls, levers, the monitor).
- */
-const STRETCH_SPEED = [1, 0.76, 0.76, 1.24];
-/** A landmark's word shows over this stretch of path around it. */
-const WORD_BEFORE = 11;
-const WORD_AFTER = 5;
+// The ride's pace (where it slows, for what) and where the eyes turn: pace.ts.
 
 const PATH_GATHER = 7; // particles within this distance of the line are drawn into the lane
 // « Structurer »: until the visitor nears the landmark the ground is loose particles,
@@ -110,14 +101,8 @@ const STRUCTURE_EDGE = 8; // softness of the forming front
 // « Performer »; on the way, levers stand on either side of the lane, one after the other,
 // and only the right ones are thrown as the guide reaches them (« Les bons leviers. Pas
 // tous. », notes.ts, shows over the same stretch).
-// Over the stretch of the note on levers (notes.ts): the first chosen one thrown just
-// after the note comes in, the last one just as it goes.
-const LEVER_STRETCH = noteStretch('levers');
-// Chosen levers are thrown a little before the guide reaches them (levers.ts), so the
-// row starts a little into the stretch and runs a little past it.
-const LEVER_FROM = LEVER_STRETCH.from + 17;
-const LEVER_SPACING = (LEVER_STRETCH.to + 8 - LEVER_FROM) / (14 - 1);
-const LEVER_THROWN = [false, true, false, false, true, false, true, false, false, true, false, true, false, false];
+// The row is laid out in pace.ts (LEVERS): read the note first, then the chosen ones on the
+// left are thrown one after the other as the eyes turn to them, then those on the right.
 // Each landmark is marked on the ground by a dial of light around the path.
 const DIAL_RADIUS = 3.4;
 const RUN_AHEAD = 2.4; // the light covers this much path per unit the guide travels
@@ -222,6 +207,7 @@ export interface TerrainOptions {
 }
 
 export async function createTerrain({ renderer, fieldCount, surface, onWord, onNote, onTags, onEnd }: TerrainOptions) {
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(NAVY);
   // Far enough to see the whole climb back down from the summit, and the horizon beyond.
@@ -289,6 +275,18 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   // The climb: every particle sits on the mountain, so the band climbs with the route,
   // and away from it the ground falls off down the mountain's flanks.
   const groundHeight = groundNode(worldX, fieldZ);
+  // The landmarks' beacons charging as the guide comes up (pace.ts, BEACON): the particles
+  // around one brighten and rise a little, and once it is charged a wave of light runs out
+  // from it over the ground and under the visitor.
+  const beaconPower = [STRUCTURE_AT, ACTIVATE_AT].map((at) => ({ at, charge: uniform(0), wave: uniform(-1) }));
+  const beaconTerms = beaconPower.map(({ at, charge, wave }) => {
+    const away = vec2(worldX.sub(centerX(at)), fieldZ.add(at)).length();
+    const front = away.sub(wave).div(2.2);
+    const running = wave.greaterThan(0).select(float(1).sub(wave.div(BEACON.waveReach)), float(0));
+    return { near: exp(away.div(6.5).pow(2).negate()).mul(charge), ring: exp(front.mul(front).negate()).mul(running) };
+  });
+  const beaconNear = beaconTerms[0].near.add(beaconTerms[1].near);
+  const beaconRing = beaconTerms[0].ring.add(beaconTerms[1].ring);
   // Contour lines: a little brighter every CONTOUR_STEP of height, as on a relief map,
   // the same lines that draw the mountain when seen from the top (relief.ts).
   const contour = smoothstep(0.78, 1, groundHeight.div(CONTOUR_STEP).fract())
@@ -303,20 +301,22 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
-  fieldMaterial.positionNode = vec3(worldX, swell.add(groundHeight), fieldZ);
+  fieldMaterial.positionNode = vec3(worldX, swell.add(groundHeight).add(beaconNear.mul(0.22)).add(beaconRing.mul(0.3)), fieldZ);
   // Far: lost in the haze. Near: thinned out so the ground does not crowd the camera.
   const haze = smoothstep(FIELD_DEPTH - FIELD_BEHIND, (FIELD_DEPTH - FIELD_BEHIND) * 0.45, ahead);
   const near = smoothstep(-FIELD_BEHIND, -FIELD_BEHIND + 4, ahead);
   const crest = smoothstep(-0.1, 0.3, swell);
   // The lane reads a touch warmer than the field; lit stretches and the crest glow.
-  const warmth = crest.mul(0.35).add(lane.mul(0.25)).add(energy.mul(0.8)).add(opened.mul(0.3)).add(scan.mul(0.7)).min(1);
+  const warmth = crest.mul(0.35).add(lane.mul(0.25)).add(energy.mul(0.8)).add(opened.mul(0.3)).add(scan.mul(0.7))
+    .add(beaconNear.mul(0.5)).add(beaconRing.mul(0.7)).min(1);
   // The sweep (« Comprendre avant de proposer ») lights the particles it passes, and swells them.
   // Points of light (sprite.ts): a whiter core in a faint halo, a slow shimmer off the lane.
   const shape = particleShape();
   const fieldSeed = hash(instanceIndex.add(uint(count * 2)));
   fieldMaterial.colorNode = coreColor(mix(color(CREAM), color(WARM), warmth), shape.core).mul(float(1).add(scan.mul(2.2)));
   const disc = clamp(float(1).sub(length(uv().sub(0.5)).mul(2)), 0, 1);
-  const glow = float(1).add(lane.mul(0.25)).add(energy.mul(1.2)).add(arrival.mul(0.7)).add(contour.mul(0.9)).add(scan.mul(2.2));
+  const glow = float(1).add(lane.mul(0.25)).add(energy.mul(1.2)).add(arrival.mul(0.7)).add(contour.mul(0.9)).add(scan.mul(2.2))
+    .add(beaconNear.mul(1)).add(beaconRing.mul(2.4));
   const fieldShimmer = mix(twinkle(time, fieldSeed, 0.3), 1, lane);
   fieldMaterial.opacityNode = shape.alpha.mul(0.62).mul(haze).mul(near).mul(glow).mul(fieldShimmer).min(1).mul(fieldShown);
   fieldMaterial.scaleNode = float(0.045).add(fieldSeed.pow(5).mul(0.08)).mul(scan.mul(1.3).add(1)).mul(SPRITE_GROWTH);
@@ -358,14 +358,27 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   };
 
   // ---- Beacons for « Structurer » and « Activer »: a column of light on the path.
-  const beacons = [STRUCTURE_AT, ACTIVATE_AT].map((at) => {
+  // As the guide comes up to one it charges (pace.ts, BEACON): the column widens and burns
+  // brighter, a halo opens at its foot, the ground around answers (the field, above).
+  const beacons = [STRUCTURE_AT, ACTIVATE_AT].map((at, i) => {
     const fade = uniform(0);
-    const across = uv().x.sub(0.5).mul(6);
-    const material = lightMaterial(exp(across.mul(across).negate()).mul(smoothstep(1, 0.1, uv().y)).mul(fade), 1.7);
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 12), material);
+    const { charge } = beaconPower[i];
+    const across = uv().x.sub(0.5).mul(mix(10.5, 5.6, charge));
+    const material = lightMaterial(
+      exp(across.mul(across).negate()).mul(smoothstep(1, 0.1, uv().y)).mul(fade).mul(charge.mul(0.5).add(1)),
+      1.7,
+    );
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 12), material);
     mesh.position.set(centerX(at), 6 + heightAt(at), -at);
     scene.add(mesh);
-    return { at, mesh, material, fade };
+    const haloMaterial = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const r = uv().sub(0.5).length().mul(2);
+    haloMaterial.colorNode = color(WARM).mul(1.5);
+    haloMaterial.opacityNode = exp(r.mul(r).mul(-5)).mul(smoothstep(1, 0.8, r)).mul(charge).mul(fade).mul(0.38);
+    const halo = new THREE.Sprite(haloMaterial);
+    halo.position.set(centerX(at), heightAt(at) + 1, -at);
+    scene.add(halo);
+    return { at, mesh, material, fade, charge, wave: beaconPower[i].wave, halo, haloMaterial };
   });
 
   // ---- A dial on the ground at each landmark: a dashed ring of light that turns slowly,
@@ -404,22 +417,20 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   // « Performer » as the visitor climbs (walls.ts), left open around « Activer »'s dial.
   const foundations = noteStretch('foundations');
   const walls = createWalls(scene, {
-    startAt: along('foundations', SCENE_AT),
-    from: along('foundations', SCENE_AT) + 12,
+    // Right after « Clarifier les fondations » has come in: the note, then the walls.
+    startAt: foundations.from + 3,
+    from: foundations.from + 13,
     to: PERFORM_AT - DIAL_RADIUS - 1.2,
     gaps: [[ACTIVATE_AT - DIAL_RADIUS - 1.2, ACTIVATE_AT + DIAL_RADIUS + 1.2]],
     offset: PATH_HALF + 1.5,
   });
   // « Les bons leviers. Pas tous. »: levers beside the lane, the chosen ones thrown in turn (levers.ts).
   const levers = createLevers(scene, {
-    from: LEVER_FROM, spacing: LEVER_SPACING, chosen: LEVER_THROWN, offset: PATH_HALF + 0.75,
+    from: LEVERS.from, spacing: LEVERS.spacing, chosen: [...LEVERS.chosen], offset: PATH_HALF + 0.75,
   });
-  // « Mesurer pour décider »: a monitoring screen in particles beside the path, its curve
-  // tracing itself while the note shows (monitor.ts); across from the note, outside the walls.
-  const measure = noteStretch('measure');
-  const monitor = createMonitor(scene, {
-    lead: 13, side: 1, offset: PATH_HALF + 4.2, from: measure.from, to: measure.to,
-  });
+  // « Mesurer pour décider »: a chart of light standing in the land on the right, before the
+  // summit, building and drawing itself once the note has been read (monitor.ts, pace.ts CHART).
+  const monitor = createMonitor(scene, { time });
 
   // ---- Labels popping up in the scene with each note (see TagView): pictograms and the
   // channels' marks (icons.ts) with a few words naming them, each on a dotted thread from
@@ -436,6 +447,8 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     ground: () => THREE.Vector3;
     lift: number;
     strength: (distance: number, sinceStop: number | null) => number;
+    /** On a phone, how far the label is drawn towards the route's centre line (LABEL_PULL by default). */
+    pull?: number;
   }
   /** Shown from `appear` (popping in) until `end` along the ride. */
   const onRide = (appear: number, end: number) => (d: number, s: number | null) =>
@@ -453,7 +466,8 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   const understand = noteStretch('understand');
   // Close to the route (whether its lane has formed yet or not), a little ahead.
   ([['search', 'Votre situation'], ['alert', 'Ce qui bloque'], ['check', 'Ce qui fonctionne']] as [IconName, string][]).forEach(([icon, caption], i) => {
-    const appear = along('understand', BADGES_AT) + i * 3.4;
+    // One after the other, close enough that the last one still reads before the next note.
+    const appear = along('understand', BADGES_AT) + i * 2.6;
     const place = besidePath(appear + 12, (i % 2 ? 1 : -1) * 4.4);
     // On a phone, right beside where the lane will run (it has not formed yet here), so
     // they read as marks along the route rather than out in the field.
@@ -463,10 +477,10 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   // « Clarifier les fondations »: positioning and targets, priorities, journey, roadmap;
   // on the walls, as they build.
   ([['target', 'Positionnement'], ['priorities', 'Priorités'], ['route', 'Parcours'], ['roadmap', 'Feuille de route']] as [IconName, string][]).forEach(([icon, caption], i) => {
-    const appear = along('foundations', BADGES_AT) + i * 3.2;
+    const appear = along('foundations', BADGES_AT) + i * 2.4;
     const place = besidePath(appear + 13, (i % 2 ? 1 : -1) * (PATH_HALF + 1.5));
     // Heights staggered, so two on the same side, seen from afar, never overlap.
-    tags.push({ id: `foundations-${i}`, marker: true, icons: [icon], caption, ground: () => place.clone().setY(place.y + 0.66), lift: 1 + (i >> 1) * 0.9, strength: onRide(appear, foundations.to + 1) });
+    tags.push({ id: `foundations-${i}`, marker: true, icons: [icon], caption, ground: () => place.clone().setY(place.y + 0.66), lift: 1 + (i >> 1) * 0.9, strength: onRide(appear, foundations.to + 2) });
   });
   // « Les bons leviers. Pas tous. »: each chosen lever shown as it is thrown, with the
   // channels it stands for: content, social media, influence, paid acquisition, CRM.
@@ -480,24 +494,39 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     const lever = levers.chosenPlaces()[i];
     if (!lever) return;
     tags.push({
-      id: `levers-${i}`, icons, caption, ground: () => lever.place.clone().setY(lever.place.y + 1.05), lift: 0.8 + (i % 3) * 0.8,
+      // The eyes go to the lever as it is thrown (pace.ts): its label stays over it.
+      id: `levers-${i}`, icons, caption, ground: () => lever.place.clone().setY(lever.place.y + 1.05), lift: 0.8 + (i % 3) * 0.8, pull: 0.15,
       // Named just before it is thrown. The last one (CRM) is still in view when « Mesurer
       // pour décider » comes in: it goes, smoothly, just before, rather than being pushed
       // aside by the note while it fades.
-      strength: onRide(lever.at - THROW_FROM - 1.5, caption === 'CRM & fidélisation' ? measure.from : LEVER_STRETCH.to + 5),
+      // The left ones go as the eyes leave them, before the right ones are shown; those go
+      // once the row is passed, before « Mesurer pour décider ».
+      // Each goes once its lever has passed, and at the latest as the eyes leave its side.
+      strength: onRide(lever.at - THROW_FROM - 1.5, Math.min(lever.at + 4, lever.side < 0 ? LEVERS.lookLeft[3] : LEVERS.lookRight[3])),
     });
   });
   // « Mesurer pour décider »: on the monitor, the indicators set first (on its target
   // line), then the evolution followed, then what to strengthen.
   tags.push({
-    id: 'measure-target', icons: ['gauge'], caption: 'Indicateurs', ground: () => monitor.targetEnd(), lift: 0.4,
-    strength: (d, s) => onRide(along('measure', BADGES_AT), measure.to + 2)(d, s) * Math.min(1, monitor.shown * 1.5),
+    id: 'measure-target', icons: ['gauge'], caption: 'Indicateurs', ground: () => monitor.targetEnd(), lift: 0.4, pull: 0,
+    // Named once its line is drawn in, before the curve starts; all stay until the chart goes.
+    strength: (d, s) => onRide(CHART.build[1], CHART.gone[0] - 1.2)(d, s) * Math.min(1, monitor.shown * 1.5),
   });
   ([['eye', 'Suivi', MONITOR_MARKS[1]], ['trend', 'Renforcer', MONITOR_MARKS[3]]] as [IconName, string, number][]).forEach(([icon, caption, t], i) => {
     tags.push({
-      id: `measure-${i}`, icons: [icon], caption, ground: () => monitor.curvePoint(t), lift: 0.55,
-      strength: (d, s) => onRide(monitor.distanceAt(t), measure.to + 2)(d, s) * monitor.shown,
+      id: `measure-${i}`, icons: [icon], caption, ground: () => monitor.curvePoint(t), lift: 0.55, pull: 0,
+      // Gone just before the chart, which is then close and wide in the view.
+      strength: (d, s) => onRide(monitor.distanceAt(t), CHART.gone[0] - 1.2)(d, s) * monitor.shown,
     });
+  });
+  // Between the sequences, over the lane ahead: where the ride is heading, in the words of
+  // the site's three stages, so the stretches between landmarks are never mute.
+  ([
+    ['way-stages', ['route'], 'Structurer · Activer · Performer', 14, 47, 50],
+    ['way-activer', ['bolt'], 'Déployer les leviers adaptés', 108.5, 118, 121],
+  ] as [string, IconName[], string, number, number, number][]).forEach(([id, icons, caption, from, to, at]) => {
+    const place = besidePath(at, 0);
+    tags.push({ id, icons, caption, ground: () => place, lift: 2.4, strength: onRide(from, to) });
   });
   /** Where the i-th action badge stands on the summit, ahead of the camera. */
   const summitBadgeGround = (i: number) => {
@@ -631,6 +660,8 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   const reward = createReward(scene);
   const steering = createSteering(surface, LATERAL_LIMIT);
   const look = new THREE.Vector3();
+  const focus = new THREE.Vector3();
+  const chosenLevers = levers.chosenPlaces();
   const summitEye = new THREE.Vector3();
   const gaze = new THREE.Vector3();
   /** Seconds into the Terrain when the ride stopped; null while riding. */
@@ -686,25 +717,34 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     narrowView = narrow;
     const calm = narrow ? 0.55 : 1;
     // A little faster after each landmark, eased in; at the end, a glide to a stop.
-    const passed = LANDMARKS.filter((landmark) => distance >= landmark.at).length;
     if (endedAt === null && distance >= END_AT) startReward();
-    const cruise = endedAt === null ? SPEED * STRETCH_SPEED[passed] : 0;
+    // The pace of the moment (pace.ts): lively between sequences, slow where there is to see and read.
+    const cruise = endedAt === null ? SPEED * paceAt(distance) : 0;
     speed = THREE.MathUtils.damp(speed, cruise, endedAt === null ? 1.2 : 2.5, dt);
     distance += speed * dt;
     travel.value = distance;
     time.value = elapsed;
 
-    // Beacons: out of the haze as they come, thinning out on the last stretch so the
-    // guide passes through where they stood, and not so early that they cross the
-    // previous landmark's word.
+    // Beacons: out of the haze as they come; as the guide comes up to one it charges (pace.ts,
+    // BEACON), the column burning brighter and wider over a halo, the ground around it lit;
+    // once charged it sends a wave of light out over the ground, and the landmark's title
+    // comes in (WORD). The guide passes through it as it fades.
     // Looking back from the summit, the landmarks show again, down the slope.
     const lookingBack = endedAt === null ? 0 : smooth(elapsed - endedAt, RELIEF_IN[0], RELIEF_IN[1]);
     for (const beacon of beacons) {
       const left = beacon.at - distance;
       beacon.fade.value = Math.max(
-        smooth(left, 3, 14) * (1 - smooth(left, FIELD_DEPTH * 0.4, FIELD_DEPTH * 0.6)) * calm,
+        smooth(left, -2, 4) * (1 - smooth(left, FIELD_DEPTH * 0.4, FIELD_DEPTH * 0.6)) * calm,
         lookingBack * 0.75,
       );
+      const charge = endedAt === null
+        ? (1 - smooth(left, BEACON.chargeTo, BEACON.chargeFrom)) * (1 - smooth(-left, 2, 10))
+        : 0;
+      beacon.charge.value = charge;
+      const wave = (BEACON.chargeTo - left) * BEACON.waveSpeed;
+      beacon.wave.value = endedAt === null && wave > 0 && wave < BEACON.waveReach ? wave : -1;
+      beacon.halo.visible = charge > 0.001;
+      beacon.halo.scale.setScalar(3 + charge * 3.5);
     }
     // Dials: from afar, until just past; a flare as the guide crosses. Not in the view back.
     for (const dial of dials) {
@@ -716,7 +756,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     // Levers: seen from a little way off; only the chosen ones are thrown, as the guide reaches them.
     levers.update(distance, lookingBack);
     walls.update(distance);
-    monitor.update(distance);
+    monitor.update(distance, narrow);
     // The ground sweep while « Comprendre avant de proposer » shows, faded in and out with it.
     // After the note and its badges have come in.
     scanAmount.value = noteEnvelope('understand', distance) * smooth(distance, along('understand', SCENE_AT), along('understand', SCENE_AT) + 2);
@@ -733,7 +773,8 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     const toRing = PERFORM_AT - distance;
     // On a phone it only comes once « Mesurer pour décider » has gone, not over it.
     const [ringNear, ringFar] = narrow ? [FIELD_DEPTH * 0.12, FIELD_DEPTH * 0.22] : [FIELD_DEPTH * 0.45, FIELD_DEPTH * 0.65];
-    ringFade.value = smooth(toRing, -1.5, 2) * (1 - smooth(toRing, ringNear, ringFar)) * (narrow ? 0.7 : 1);
+    // It waits for the chart (monitor.ts) to have been read: the chart, then the gate.
+    ringFade.value = smooth(toRing, -1.5, 2) * (1 - smooth(toRing, ringNear, ringFar)) * (narrow ? 0.7 : 1) * (1 - monitor.shown * 0.92);
     arrival.value = smooth(distance, PERFORM_AT - 1, PERFORM_AT + 0.5) * (1 - smooth(distance, PERFORM_AT + 1, PERFORM_AT + 16));
     // Arriving on the summit, the light swells once more.
     const arriving = endedAt === null ? 0 : Math.exp(-(((elapsed - endedAt - 0.6) / 0.7) ** 2));
@@ -747,9 +788,9 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     // « Performer » stays while the camera settles on the summit, so the faster ride
     // does not cut it short; then the summit speaks for itself.
     const showing = endedAt === null
-      ? LANDMARKS.find((l, i) => distance >= l.at - WORD_BEFORE
+      ? LANDMARKS.find((l, i) => distance >= l.at - WORD.before
         // The last one stays until the stop, then through the pause (below): no gap between.
-        && (distance < l.at + WORD_AFTER || i === LANDMARKS.length - 1))
+        && (distance < l.at + WORD.after || i === LANDMARKS.length - 1))
       : elapsed - endedAt < PAUSE[1] ? LANDMARKS[LANDMARKS.length - 1] : undefined;
     const next = showing?.word ?? null;
     if (next !== word) {
@@ -796,6 +837,26 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     camera.position.set(centerX(behind) + lateral * 0.55, CAMERA_HEIGHT + heightAt(distance - CAMERA_BACK * 0.5), -behind);
     look.set(centerX(distance + 12) + lateral * 0.8, 0.5 + heightAt(distance + 12), -distance - 12);
 
+    // Where the eyes go (pace.ts, lookWeights): to each chosen lever as it is thrown, the
+    // left ones then the right ones, back to the path in between; then to the chart. Each
+    // glance eases in and out with the ride, which slows meanwhile.
+    const glance = endedAt === null ? lookWeights(distance) : null;
+    if (glance) {
+      const motion = reducedMotion ? 0.4 : 1;
+      if (glance.levers > 0) {
+        focus.set(0, 0, 0);
+        let total = 0;
+        for (const lever of chosenLevers) {
+          const weight = Math.exp(-(((distance - (lever.at - LEVER_FOCUS)) / 3.2) ** 2));
+          focus.addScaledVector(lever.place, weight);
+          total += weight;
+        }
+        // On a portrait phone the view is narrow: the eyes go most of the way to the lever.
+        const share = Math.min(0.85, glance.levers * (narrow ? 1.6 : 1));
+        if (total > 1e-4) look.lerp(focus.divideScalar(total).setY(focus.y + 0.9), share * motion);
+      }
+      if (glance.chart > 0) look.lerp(monitor.centre(), Math.min(0.9, glance.chart * (narrow ? 2.2 : 1)) * motion);
+    }
     if (endedAt !== null) playEnding(elapsed - endedAt);
     camera.lookAt(look);
     if (endedAt !== null && elapsed - endedAt < ACTIONS[0]) {
@@ -838,7 +899,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
         // On a phone the label stands over the route rather than out to the side: drawn
         // most of the way towards the centre line at that point of the path (its thread
         // still reaches its own point), so it follows the route's bends.
-        tagLabel.x = THREE.MathUtils.lerp(tagLabel.x, centerX(-tagGround.z), LABEL_PULL);
+        tagLabel.x = THREE.MathUtils.lerp(tagLabel.x, centerX(-tagGround.z), tag.pull ?? LABEL_PULL);
       }
       const depth = -tagDepth.copy(tagLabel).applyMatrix4(camera.matrixWorldInverse).z;
       if (depth < 1) continue;
@@ -1058,7 +1119,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       }
       const materials = [
         fieldMaterial, horizonMaterial, guideMaterial, trailMaterial, ring.material,
-        ...beacons.map((b) => b.material),
+        ...beacons.map((b) => b.material), ...beacons.map((b) => b.haloMaterial),
       ];
       for (const material of materials) material.dispose();
       onWord?.(null);

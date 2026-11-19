@@ -251,6 +251,11 @@ export class Epilogue {
       placed.push(...this.wordBoxes);
     }
     if (this.noteBox) placed.push(this.noteBox);
+    // Nor over the welcome message while it shows (on a phone it takes two lines).
+    if (views.length && !this.message.classList.contains('is-hidden')) {
+      const r = this.message.getBoundingClientRect();
+      placed.push({ left: r.left - 12, right: r.right + 12, top: r.top - 10, bottom: r.bottom + 10 });
+    }
     // Nor under « Quitter le Terrain » (on a phone the labels come up that far).
     if (views.length) {
       if (!this.closeBox) {

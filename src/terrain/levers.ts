@@ -9,9 +9,14 @@ const WARM = '#ffd9a0';
 /** Arm angle at rest (leaning back towards the visitor) and once thrown (forward). */
 const REST = 0.7;
 const THROWN = -0.7;
-/** A chosen lever is thrown over this stretch before the guide reaches it, well in view. */
-export const THROW_FROM = 8;
-const THROW_TO = 5;
+/**
+ * A chosen lever is thrown over this stretch before the guide reaches it: close enough
+ * that, the eyes turned to its side (pace.ts, LEVERS), it stands well in view as it goes.
+ */
+export const THROW_FROM = 4;
+const THROW_TO = 1.5;
+/** The flare of light that marks the throw, over this much path after it starts. */
+const FLARE_OVER = 5;
 /** Distance over which the pulse runs out on the ground once a lever is thrown. */
 const PULSE_OVER = 4.5;
 /** Spacing of the points that make up a lever (in its own space), as for the walls' bricks. */
@@ -67,12 +72,14 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
     const seen = uniform(0);
     const thrown = uniform(0);
     const pulse = uniform(0);
+    const flare = uniform(0);
 
     // Plinth: cream points, as faint as the bricks.
     const plinthMaterial = light(points(DOT).mul(0.55).mul(seen), color(CREAM).mul(0.42));
-    // Arm: a line of champagne points, lit warm once thrown.
+    // Arm: a line of champagne points, lit warm once thrown. The levers left alone stay
+    // fainter: what is chosen stands out from what is not.
     const armMaterial = light(
-      pointsAlongY(0.05).mul(float(0.8).add(thrown.mul(0.2))).mul(seen),
+      pointsAlongY(0.05).mul(float(isChosen ? 0.8 : 0.5).add(thrown.mul(0.2))).mul(seen),
       color(CHAMPAGNE).mul(float(0.9).add(thrown.mul(1.2))),
     );
     // Knob: a soft point of light at the top, faint at rest, bright once thrown.
@@ -83,7 +90,7 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
       blending: THREE.AdditiveBlending,
     });
     knobMaterial.colorNode = color(WARM).mul(float(0.8).add(thrown.mul(1.6)));
-    knobMaterial.opacityNode = exp(centre.mul(centre).mul(-9)).mul(float(isChosen ? 0.55 : 0.35).add(thrown.mul(0.6))).mul(seen);
+    knobMaterial.opacityNode = exp(centre.mul(centre).mul(-9)).mul(float(isChosen ? 0.55 : 0.22).add(thrown.mul(0.6)).add(flare.mul(0.8))).mul(seen);
     // The collar marks a chosen lever: faint until thrown, then bright.
     const collarMaterial = light(seen.mul(isChosen ? 0.4 : 0).add(thrown.mul(0.9)), color(CHAMPAGNE).mul(1.3));
     // One ring running out on the ground as the lever is thrown.
@@ -92,6 +99,23 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
       exp(band.mul(band).negate()).mul(float(1).sub(pulse)).mul(pulse.greaterThan(0).select(float(0.8), float(0))),
       color(WARM).mul(1.2),
     );
+
+    // The throw's flare: a column of light rising over the lever, bright as it is thrown,
+    // then settling to a faint glow that keeps it marked as one of the chosen.
+    const columnMaterial = new THREE.SpriteNodeMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const across = uv().x.sub(0.5).mul(5);
+    const rise = smoothstep(0, 0.18, uv().y).mul(smoothstep(1, 0.35, uv().y));
+    columnMaterial.colorNode = color(WARM).mul(1.4);
+    columnMaterial.opacityNode = exp(across.mul(across).negate()).mul(rise).mul(flare.mul(0.85).add(thrown.mul(0.16))).mul(seen);
+    const column = new THREE.Sprite(columnMaterial);
+    column.center.set(0.5, 0);
+    column.scale.set(0.55, 3.4, 1);
+    column.position.y = 0.1;
+    column.visible = isChosen;
 
     const group = new THREE.Group();
     const pivot = new THREE.Group();
@@ -106,6 +130,7 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
       new THREE.Mesh(collarGeometry, collarMaterial),
       new THREE.Mesh(pulseGeometry, pulseMaterial),
       pivot,
+      column,
     );
     // Beside the lane, square to the route where it stands, on the ground there.
     const heading = headingAt(at);
@@ -118,8 +143,8 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
     pivot.rotation.x = REST;
     scene.add(group);
     return {
-      at, isChosen, group, pivot, baseY, seen, thrown, pulse,
-      materials: [plinthMaterial, armMaterial, knobMaterial, collarMaterial, pulseMaterial],
+      at, isChosen, group, pivot, knob, baseY, seen, thrown, pulse, flare,
+      materials: [plinthMaterial, armMaterial, knobMaterial, collarMaterial, pulseMaterial, columnMaterial],
     };
   });
 
@@ -141,6 +166,10 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
         // Eased so the arm sets off gently and lands firmly: a deliberate throw.
         const swing = thrown * thrown * (3 - 2 * thrown);
         lever.pivot.rotation.x = THREE.MathUtils.lerp(REST, THROWN, swing);
+        // The flare rises with the throw and fades over the next few steps.
+        const sinceThrow = (distance - (lever.at - THROW_FROM)) / FLARE_OVER;
+        lever.flare.value = lever.isChosen && sinceThrow > 0 && sinceThrow < 1 ? Math.sin(Math.PI * Math.sqrt(sinceThrow)) : 0;
+        lever.knob.scale.setScalar(0.42 * (1 + lever.flare.value * 1.1));
       }
     },
     /** Moves the levers with the ground when it deepens for the view back (relief.ts). */

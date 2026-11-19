@@ -28,17 +28,19 @@ interface RideNote extends Note {
   to: number;
 }
 
-// Landmarks at 60, 125, 195 (path.ts); their titles show from 11 before to 5 after
-// (terrain.ts): free path 65..114 and 130..184. Two notes on each, sharing it evenly:
-// the first right after the title, the last well before the next one. The ride stops at 203.
+// Landmarks at 60, 125, 195 (path.ts); their titles show from 7 before to 7 after
+// (pace.ts, WORD): free path 68..117 and 133..187. Each note comes right after what
+// introduces it, and the ride slows over its stretch (pace.ts), so it reads in full.
+// The ride stops at 203.
 const RIDE: RideNote[] = [
   // Structurer → Activer: understand the situation, then lay clear foundations
-  // (« Clarifier les fondations », the site's Structurer).
-  { topic: 'understand', from: 66, to: 88, side: -1, text: 'Comprendre *avant* de proposer.' },
-  { topic: 'foundations', from: 90, to: 112, side: 1, text: 'Clarifier les *fondations*.' },
-  // Activer → Performer: the right levers, not all of them; then measuring to decide.
-  { topic: 'levers', from: 131, to: 155, side: 1, text: 'Les *bons* leviers. Pas tous.' },
-  { topic: 'measure', from: 157, to: 181, side: -1, text: 'Mesurer pour *décider*.' },
+  // (« Clarifier les fondations », the site's Structurer), straight after.
+  { topic: 'understand', from: 68, to: 86, side: -1, text: 'Comprendre *avant* de proposer.' },
+  { topic: 'foundations', from: 88, to: 108, side: 1, text: 'Clarifier les *fondations*.' },
+  // Activer → Performer: the right levers, not all of them, read before they are shown
+  // (left, then right); then measuring to decide, read before the chart draws itself.
+  { topic: 'levers', from: 133, to: 145, side: 1, text: 'Les *bons* leviers. Pas tous.' },
+  { topic: 'measure', from: 170, to: 181, side: -1, text: 'Mesurer pour *décider*.' },
 ];
 
 /** The stretch of path (guide distances) over which the note on a topic shows. */

@@ -8,6 +8,7 @@ import { createParticles } from './world/particles';
 import { createKeyMesh } from './world/keyMesh';
 import { prepareKeyGlyph } from './world/glyph';
 import { DOOR_X, createDoor } from './world/door';
+import { createDoorStream } from './world/doorStream';
 import { dissolveProgress, leafInverse, leafMatrix, setBuild } from './world/dissolve';
 import { STORY_END, cameraAt, storyAt } from './core/story';
 import { FrameMonitor, TIERS, forcedTier, initialTier, type Tier } from './core/quality';
@@ -90,6 +91,10 @@ async function start(): Promise<void> {
     logo.anisotropy = 4;
   }
   const door = createDoor(logo);
+  // The open door's breath: gold particles coming out of the light towards the visitor.
+  const STREAM_SHARE = 1 / 36; // of the tier's particles
+  const stream = createDoorStream(Math.round(TIERS[tier].particles * STREAM_SHARE), reducedMotion);
+  scene.add(stream.object);
   const key = createKeyMesh();
   door.keyHolder.add(key.mesh);
   scene.add(door.group);
@@ -119,6 +124,7 @@ async function start(): Promise<void> {
     applyPixelRatio(next);
     drawSize.set(0, 0); // forces the canvas to be resized on the next frame
     applyCount(TIERS[next].particles);
+    stream.setCount(Math.round(TIERS[next].particles * STREAM_SHARE));
     useBloom = next !== 'low';
     console.info(`KEYS Lab: qualité ${next}`);
   };
@@ -133,6 +139,7 @@ async function start(): Promise<void> {
   door.setReveal(1);
   door.setGlow(1);
   key.setSolid(1);
+  stream.object.visible = true;
   renderer.compute(particles.update);
   const compiled = await Promise.race([
     renderer.compileAsync(scene, camera).then(() => true),
@@ -178,6 +185,8 @@ async function start(): Promise<void> {
   const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   const hit = new THREE.Vector3();
   const lookTarget = new THREE.Vector3();
+  const streamAim = new THREE.Vector3();
+  const pointerAim = new THREE.Vector3();
 
   const scrollProgress = () => {
     const max = document.documentElement.scrollHeight - window.innerHeight;
@@ -264,9 +273,11 @@ async function start(): Promise<void> {
     dissolveProgress.value = dissolve;
     setBuild(state.build);
     door.setReveal(state.door);
-    door.setGlow(state.glow);
+    // Going in (« Entrer »), the light swells a little as the visitor nears it.
+    const push = epilogue.push;
+    door.setGlow(state.glow * (1 + push * 0.3));
     // The halo is kept for the light behind the door: on the dense particle key it burns to white.
-    glowPass.strength.value = state.glow * 0.55;
+    glowPass.strength.value = state.glow * 0.55 * (1 + push * 0.6);
 
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
@@ -281,12 +292,27 @@ async function start(): Promise<void> {
     }
     cameraAt(story, distanceScale, camera.position, lookTarget);
     // Entering the Terrain: the camera moves through the doorway while the light comes up.
-    const push = epilogue.push;
     if (push > 0) {
       camera.position.lerp(DOORWAY_EYE, push);
       lookTarget.lerp(DOORWAY_LOOK, push);
     }
     camera.lookAt(lookTarget);
+
+    // The door's breath (doorStream.ts): out of the light as the door opens, towards a point
+    // in front of the visitor, or the pointer, which draws the current to it; thicker as
+    // they go in.
+    const breath = state.glow * (0.8 + push * 1.4);
+    stream.intensity.value = breath;
+    stream.object.visible = breath > 0.002;
+    if (stream.object.visible) {
+      stream.time.value = timer.getElapsed();
+      streamAim.set(0, 0, -1).applyQuaternion(camera.quaternion).multiplyScalar(2.6).add(camera.position);
+      if (pointerActive) {
+        raycaster.setFromCamera(ndc, camera);
+        streamAim.lerp(raycaster.ray.at(4.5, pointerAim), 0.6);
+      }
+      stream.attract.value.lerp(streamAim, 1 - Math.exp(-dt * 2.5));
+    }
 
     if (pointerActive && state.flow === 0) {
       raycaster.setFromCamera(ndc, camera);

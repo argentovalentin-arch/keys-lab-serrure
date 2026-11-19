@@ -7,6 +7,7 @@ import { chaosLayout, keyLayout } from './shapes';
 import { DOOR_X, LEAF } from './door';
 import { PARTICLE_LIFE, dissolveField, dissolveProgress, leafMatrix } from './dissolve';
 import { SPRITE_GROWTH, coreColor, particleShape, twinkle } from './sprite';
+import { BRAND, LAB } from '../core/brand';
 
 const CHAOS_RADIUS = 4.5;
 // Door particles stay in the door's own zone: beyond the wall's back face (so never in
@@ -159,8 +160,8 @@ export function createParticles(count: number) {
   // own navy: seen against the light of the doorway, they read as dark flakes of door.
   // (Additive cream would vanish into that light; see setDoorMode.)
   const speed = length(velocities.toAttribute());
-  const shapeColor = mix(color('#f4ecdc'), color('#e3a35a'), smoothstep(0.4, 3, speed));
-  const doorColor = mix(color('#c98a45'), color('#1c2a44'), smoothstep(0, 0.5, age));
+  const shapeColor = mix(color(LAB.dust), color(LAB.warmth), smoothstep(0.4, 3, speed));
+  const doorColor = mix(color('#c98a45'), color(BRAND.navy), smoothstep(0, 0.5, age));
   // Points of light (sprite.ts): a whiter core in a faint halo.
   // Far in the cloud they cool towards the night's blue, near they stay cream: depth.
   const shape = particleShape();

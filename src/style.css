@@ -1,9 +1,13 @@
 :root {
-  --navy: #0e1726;
-  --cream: #f4ecdc;
-  --cream-soft: rgba(244, 236, 220, 0.62);
-  /* Between the cream of the text and the brass of the key and lock. */
-  --champagne: #dcc59b;
+  /* Keys Performance's colours (src/core/brand.ts, keys-lab-livrables/01-identite-keys-performance.md).
+     --navy is the Lab's night: the brand's navy deepened; the brand's own navy is --brand-navy. */
+  --navy: #0e1529;
+  --brand-navy: #16213f;
+  --cream: #fdfbf5;
+  --cream-soft: rgba(253, 251, 245, 0.65);
+  --champagne: #e9d7b4;
+  --prune: #3b2144;
+  --hairline-inverse: rgba(253, 251, 245, 0.25);
   --serif: 'Bodoni Moda', Didot, serif;
   --sans: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
   --gutter: clamp(16px, 4vw, 48px);
@@ -146,9 +150,10 @@ html, body {
 .stage__link {
   display: inline-block;
   margin-top: 20px;
-  padding: 10px 18px;
-  border: 1px solid rgba(244, 236, 220, 0.4);
-  border-radius: 999px;
+  padding: 12px 20px;
+  /* As on the brand's site: square corners, a hairline. */
+  border: 1px solid rgba(253, 251, 245, 0.45);
+  border-radius: 0;
   color: var(--cream);
   text-decoration: none;
   font-size: 0.9rem;
@@ -265,12 +270,17 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 .terrain-ui__rule {
   width: 40px;
   height: 1px;
-  background: linear-gradient(90deg, var(--champagne), rgba(220, 197, 155, 0.2));
+  background: linear-gradient(90deg, var(--champagne), rgba(233, 215, 180, 0.2));
   transform-origin: left;
   transition: transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s;
 }
 .terrain-ui__name {
-  display: block;
+  /* Hugs the word, so the brand's corner brackets (below) frame it: the stage being entered
+     is marked as the site marks the active item of its navigation. */
+  position: relative;
+  display: table;
+  margin: 0 auto;
+  padding: 0.12em 0.32em 0.16em;
   font-family: var(--serif);
   font-weight: 400;
   font-variation-settings: 'opsz' 96;
@@ -319,27 +329,48 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
   animation: terrain-tag-pop 0.65s cubic-bezier(0.2, 1.5, 0.4, 1) both;
 }
 .terrain-tag__badge {
+  position: relative;
   display: flex;
   gap: 7px;
   padding: 8px;
-  border: 1px solid rgba(220, 197, 155, 0.6);
-  border-radius: 999px;
-  background: rgba(14, 23, 38, 0.72);
-  box-shadow: 0 0 18px rgba(255, 217, 160, 0.18), inset 0 0 10px rgba(220, 197, 155, 0.12);
+  /* The brand's frame: a hairline, square corners, and champagne corner brackets (as round
+     the active item of its navigation), rather than a glowing pill. */
+  border: 1px solid var(--hairline-inverse);
+  border-radius: 0;
+  background: rgba(14, 21, 41, 0.78);
   color: var(--cream);
+}
+.terrain-tag__badge::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  pointer-events: none;
+  --c: var(--champagne);
+  background:
+    linear-gradient(var(--c), var(--c)) top left / 7px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / 1px 7px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 7px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 1px 7px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 7px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 1px 7px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 7px 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 1px 7px no-repeat;
 }
 .terrain-tag__icon { display: block; width: 27px; height: 27px; }
 .terrain-tag__icon svg { display: block; width: 100%; height: 100%; }
 /* The few words naming it: small, spaced capitals on a dark backing so they read on the
    lit ground; clearly below the notes and titles. */
 .terrain-tag__caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 2px 7px;
-  border-radius: 4px;
-  background: rgba(10, 16, 28, 0.6);
+  border-radius: 0;
+  background: rgba(14, 21, 41, 0.6);
   white-space: nowrap;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--cream);
   text-shadow: 0 1px 8px rgba(5, 9, 17, 0.95);
@@ -350,12 +381,32 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
   top: 0;
   height: 1px;
   transform-origin: 0 50%;
-  background: repeating-linear-gradient(90deg, rgba(220, 197, 155, 0.75) 0 2px, transparent 2px 6px);
+  background: repeating-linear-gradient(90deg, rgba(233, 215, 180, 0.75) 0 2px, transparent 2px 6px);
   animation: terrain-tag-thread 0.5s ease both;
 }
 @keyframes terrain-tag-pop {
   from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(0.6); }
 }
+/* The method chart's labels (monitor.ts), set as on the brand's site: a step's numeral in
+   Bodoni over its name in spaced capitals; a pillar's name alone, quieter; no frame. */
+.terrain-tag--step .terrain-tag__label, .terrain-tag--pillar .terrain-tag__label { gap: 3px; }
+.terrain-tag__numeral {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--champagne);
+  text-shadow: 0 1px 10px rgba(5, 9, 17, 0.95);
+}
+.terrain-tag--step .terrain-tag__caption, .terrain-tag--pillar .terrain-tag__caption { background: none; padding: 0; }
+.terrain-tag--step .terrain-tag__caption::before { display: none; }
+.terrain-tag--pillar .terrain-tag__caption { font-size: 0.58rem; letter-spacing: 0.28em; color: var(--cream-soft); }
+.terrain-tag--pillar .terrain-tag__thread { display: none; }
+.terrain-tag.is-quiet .terrain-tag__caption { display: none; }
+
+/* The brand's label mark: a small solid square before the words (prune on its light pages,
+   champagne on the Lab's night, where prune would not read). */
+.terrain-tag__caption::before { content: ''; width: 5px; height: 5px; flex: none; background: var(--champagne); }
 /* What the badge shows comes first, the words naming it a moment after: the eye goes to
    the badge, then reads. */
 .terrain-tag__caption { animation: terrain-caption-in 0.55s ease 0.5s both; }
@@ -436,7 +487,7 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 
 /* Over the lit ground, the buttons sit on a navy veil so they keep their contrast. */
 .terrain-ui__choices .stage__link {
-  background: rgba(14, 23, 38, 0.72);
+  background: rgba(14, 21, 41, 0.72);
 }
 
 .terrain-ui__choices .stage__action { margin-left: 0; }
@@ -452,9 +503,9 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
   top: 72px;
   right: var(--gutter);
   padding: 10px 18px;
-  border: 1px solid rgba(244, 236, 220, 0.5);
-  border-radius: 999px;
-  background: rgba(14, 23, 38, 0.55);
+  border: 1px solid rgba(253, 251, 245, 0.45);
+  border-radius: 0;
+  background: rgba(14, 21, 41, 0.55);
   color: var(--cream);
   font: inherit;
   font-size: 0.85rem;
@@ -524,7 +575,7 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 .loader__track {
   width: 100%;
   height: 1px;
-  background: rgba(244, 236, 220, 0.15);
+  background: rgba(253, 251, 245, 0.15);
 }
 
 .loader__bar {
@@ -563,6 +614,26 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 
 /* The Terrain's words over bright light (beacons, the summit's column): a soft shade
    behind them, unseen on the dark ground, keeps them readable. */
+.terrain-ui__name::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  --c: rgba(233, 215, 180, 0.85);
+  --l: clamp(10px, 1.4vw, 18px);
+  background:
+    linear-gradient(var(--c), var(--c)) top left / var(--l) 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / 1px var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / var(--l) 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 1px var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / var(--l) 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 1px var(--l) no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / var(--l) 1px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 1px var(--l) no-repeat;
+  transition: opacity 0.6s ease 0.5s;
+}
+.terrain-ui__word.is-hidden .terrain-ui__name::after { opacity: 0; transition-delay: 0s; }
+
 .terrain-ui__word::before, .terrain-ui__note::before {
   content: '';
   position: absolute;

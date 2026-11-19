@@ -4,8 +4,9 @@ import {
 } from 'three/tsl';
 import { buildKeyGeometry } from '../world/keyMesh';
 import { bowHangPoint } from '../world/shapes';
+import { LAB } from '../core/brand';
 
-const WARM = '#ffd9a0';
+const WARM = LAB.light;
 const ARC_POINTS = 80;
 
 const smooth = THREE.MathUtils.smoothstep;
@@ -117,7 +118,7 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
     const diffuse = mix(color('#4a3c26'), color('#d9bf8a'), normalWorld.dot(LIGHT).mul(0.5).add(0.5));
     const highlight = pow(max(normalView.dot(SHINE), 0), 28).mul(0.85);
     const edge = pow(float(1).sub(normalView.z.abs()), 3).mul(0.45);
-    material.colorNode = diffuse.add(color('#fff1d0').mul(highlight)).add(color(WARM).mul(edge))
+    material.colorNode = diffuse.add(color(LAB.lightCore).mul(highlight)).add(color(WARM).mul(edge))
       .add(color(WARM).mul(glow.mul(0.9)));
     material.opacityNode = fade.mul(held);
     return material;

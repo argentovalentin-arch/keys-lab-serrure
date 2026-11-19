@@ -15,8 +15,9 @@ import { FrameMonitor, TIERS, forcedTier, initialTier, type Tier } from './core/
 import { Loader } from './ui/loader';
 import { Stage, type Chapter } from './ui/stage';
 import { Epilogue } from './ui/epilogue';
+import { LAB } from './core/brand';
 
-const NAVY = '#0e1726';
+const NAVY = LAB.night;
 
 const CHAPTERS: Chapter[] = [
   { title: 'Tout est là.', lead: 'Rien n’est encore à sa place.' },

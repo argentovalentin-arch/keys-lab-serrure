@@ -47,7 +47,7 @@ export class Epilogue {
   private readonly wordName = document.querySelector<HTMLElement>('#terrain-word-name')!;
   private readonly note = document.querySelector<HTMLElement>('#terrain-note')!;
   private readonly tagLayer = document.querySelector<HTMLElement>('#terrain-tags')!;
-  private readonly tagElements = new Map<string, { root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number; clear: number }>();
+  private readonly tagElements = new Map<string, { root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number; clear: number; quiet: boolean }>();
   private noteText: string | null = null;
   // Sizes read from the page once, not every frame: reading layout right after moving
   // elements forces the browser to lay the page out again, several times a frame.
@@ -271,23 +271,37 @@ export class Epilogue {
       let element = this.tagElements.get(view.id);
       if (!element) {
         const root = document.createElement('div');
-        root.className = 'terrain-tag';
+        root.className = `terrain-tag terrain-tag--${view.kind}`;
         const thread = document.createElement('span');
         thread.className = 'terrain-tag__thread';
         const label = document.createElement('span');
         label.className = 'terrain-tag__label';
-        // Our own static SVG (icons.ts), never content from elsewhere.
-        const badge = document.createElement('span');
-        badge.className = 'terrain-tag__badge';
-        badge.innerHTML = view.icons.map((name) => `<span class="terrain-tag__icon">${ICONS[name]}</span>`).join('');
+        if (view.kind === 'badge') {
+          // Our own static SVG (icons.ts), never content from elsewhere.
+          const badge = document.createElement('span');
+          badge.className = 'terrain-tag__badge';
+          badge.innerHTML = view.icons.map((name) => `<span class="terrain-tag__icon">${ICONS[name]}</span>`).join('');
+          label.append(badge);
+        } else if (view.kind === 'step' && view.numeral) {
+          // A step of the method: its numeral, set as on the brand's site.
+          const numeral = document.createElement('span');
+          numeral.className = 'terrain-tag__numeral';
+          numeral.textContent = view.numeral;
+          label.append(numeral);
+        }
         const caption = document.createElement('span');
         caption.className = 'terrain-tag__caption';
         caption.textContent = view.caption;
-        label.append(badge, caption);
+        label.append(caption);
         root.append(thread, label);
         this.tagLayer.append(root);
-        element = { root, thread, label, width: -1, height: -1, clear: 1 };
+        element = { root, thread, label, width: -1, height: -1, clear: 1, quiet: false };
         this.tagElements.set(view.id, element);
+      }
+      if (element.quiet !== view.quiet) {
+        element.quiet = view.quiet;
+        element.root.classList.toggle('is-quiet', view.quiet);
+        element.width = -1;
       }
       if (element.width < 0) {
         element.width = element.label.offsetWidth;

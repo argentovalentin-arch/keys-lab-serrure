@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { abs, color, float, max, normalLocal, positionLocal, smoothstep, uniform, vec2 } from 'three/tsl';
 import { centerX, groundAt, headingAt } from './path';
+import { LAB } from '../core/brand';
 
 const BRICK = { length: 0.56, height: 0.2, depth: 0.28, gap: 0.035 };
 const COURSES = 3;
@@ -69,7 +70,7 @@ export function createWalls(scene: THREE.Scene, { from, startAt, to, gaps, offse
   const half = vec2(BRICK.length / 2, BRICK.height / 2);
   const toEdge = max(abs(positionLocal.x).div(half.x), abs(positionLocal.y).div(half.y));
   const edge = smoothstep(0.86, 1, toEdge);
-  material.colorNode = color('#f4ecdc').mul(0.42);
+  material.colorNode = color(LAB.dust).mul(0.42);
   material.opacityNode = point.mul(float(0.22).add(edge.mul(0.5))).add(edge.mul(0.03)).mul(shown);
   const geometry = new THREE.BoxGeometry(BRICK.length, BRICK.height, BRICK.depth);
   const mesh = new THREE.InstancedMesh(geometry, material, bricks.length);

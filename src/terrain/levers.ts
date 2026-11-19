@@ -1,10 +1,11 @@
 import * as THREE from 'three/webgpu';
 import { color, exp, float, length, positionLocal, smoothstep, uniform, uv } from 'three/tsl';
 import { centerX, groundAt, headingAt } from './path';
+import { BRAND, LAB } from '../core/brand';
 
-const CREAM = '#f4ecdc';
-const CHAMPAGNE = '#dcc59b';
-const WARM = '#ffd9a0';
+const CREAM = LAB.dust;
+const CHAMPAGNE = BRAND.champagne;
+const WARM = LAB.light;
 
 /** Arm angle at rest (leaning back towards the visitor) and once thrown (forward). */
 const REST = 0.7;
@@ -14,7 +15,7 @@ const THROWN = -0.7;
  * that, the eyes turned to its side (pace.ts, LEVERS), it stands well in view as it goes.
  */
 export const THROW_FROM = 4;
-const THROW_TO = 1.5;
+export const THROW_TO = 1.5;
 /** The flare of light that marks the throw, over this much path after it starts. */
 const FLARE_OVER = 5;
 /** Distance over which the pulse runs out on the ground once a lever is thrown. */

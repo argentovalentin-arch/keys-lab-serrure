@@ -3,103 +3,104 @@ import { abs, color, exp, float, floor, fract, hash, instanceIndex, instancedArr
 import { centerX, groundAt, headingAt } from './path';
 import { CHART } from './pace';
 import { particleShape } from '../world/sprite';
-
-const CREAM = '#f4ecdc';
-const WARM = '#ffd9a0';
-const WIDTH = 9.6;
-const HEIGHT = 5;
-/** The back plane (grid) stands this far behind the front one (axes, curve): depth. */
-const BACK = 0.7;
-const GRID_LINES = 3;
-const CURVE_POINTS = 260;
-const FILL_COLUMNS = 90;
-const MOTES = 90;
-
-// Kinds of point, stored with each one (with its place along what it draws, in the same float).
-const AXIS = 0;
-const GRID = 1;
-const CURVE = 2;
-const CURSOR = 3;
-const TARGET = 4;
-const MARK = 5;
-const DROP = 6;
-const FILL = 7;
-const FRAME = 8;
-const MOTE = 9;
-
-/** The level set before the curve starts (« les indicateurs sont définis avant de produire »). */
-const TARGET_LEVEL = 0.62;
-/** Points of the curve marked as it reaches them, named by terrain.ts. */
-export const MONITOR_MARKS = [0.22, 0.5, 0.74, 0.9];
+import { BRAND, LAB } from '../core/brand';
 
 /**
- * The evolution shown: rising overall, with its ups and downs. A shape, not data: there
- * are no figures anywhere on the chart, only the rise towards the target and past it.
+ * Before the summit, on the right of the path: Keys Performance's own method chart, as it
+ * stands on keysperformance.com (« Comprendre avant de proposer »), set in the land in
+ * points of light. Three dotted lines are the three pillars (Structurer, Activer,
+ * Performer); a curve runs through the method's six steps, 01 Comprendre to 06 Piloter,
+ * each marked by a ring that fills as the curve reaches it.
+ *
+ * As the site says under it: the three lines are the pillars, not a scale of results; the
+ * chart says in which order things happen, nothing else. So there is no figure on it, no
+ * area under the curve, no target, no cursor: only the order, drawn.
+ *
+ * It builds itself in order, as the visitor comes up to it (pace.ts, CHART): the frame's
+ * corners and the pillars draw in from the left, then the curve draws itself through the
+ * steps, its head bright; motes drift up through it. Its labels (terrain.ts) name the
+ * pillars and each step as the curve reaches it.
  */
-const curveAt = (t: number) => 0.08 + 0.72 * t ** 1.4 + 0.07 * Math.sin(t * 15) * (0.4 + t) + 0.03 * Math.sin(t * 37);
+
+const WIDTH = 9.6;
+const HEIGHT = 3.7;
+/** The pillars stand a little behind the curve: depth. */
+const BACK = 0.35;
+const CURVE_POINTS = 300;
+const MOTES = 70;
+
+/** The three pillars, bottom to top, as on the site. */
+export const PILLARS = ['Structurer', 'Activer', 'Performer'] as const;
+const PILLAR_LEVELS = [0, 0.5, 1];
+
+/**
+ * The method's six steps (keysperformance.com): across, evenly; up, on their pillar.
+ * 04 Construire stands halfway between Structurer and Activer, as on the site.
+ */
+export const STEPS = [
+  { numeral: '01', name: 'Comprendre', level: 0 },
+  { numeral: '02', name: 'Diagnostiquer', level: 0 },
+  { numeral: '03', name: 'Prioriser', level: 0 },
+  { numeral: '04', name: 'Construire', level: 0.25 },
+  { numeral: '05', name: 'Activer', level: 0.5 },
+  { numeral: '06', name: 'Piloter', level: 1 },
+] as const;
+/** Where each step stands across the chart (0..1). */
+export const stepAt = (i: number) => i / (STEPS.length - 1);
+
+/** The curve between the steps: level, then an eased rise to the next step's level. */
+const curveAt = (x: number) => {
+  const span = 1 / (STEPS.length - 1);
+  const i = Math.min(STEPS.length - 2, Math.floor(x / span));
+  const t = (x - i * span) / span;
+  const eased = t * t * (3 - 2 * t);
+  return STEPS[i].level + (STEPS[i + 1].level - STEPS[i].level) * eased;
+};
+
+// Kinds of point, stored with each one (with its place along what it draws, in the same float).
+const PILLAR = 0;
+const CURVE = 1;
+const RING = 2;
+const CORE = 3;
+const FRAME = 4;
+const MOTE = 5;
 
 export interface MonitorOptions {
   /** The Terrain's clock, for the motes drifting up through the chart. */
   time: THREE.Node<'float'>;
 }
 
-/**
- * « Mesurer pour décider »: a chart standing in the landscape on the right of the path,
- * just before the summit, made of the same points of light as everything else. It is set
- * in the world and seen coming, growing as the visitor nears it, the eyes drawn to it
- * (pace.ts, CHART), while the ride slows right down.
- *
- * It builds itself in order: the frame's corners and the axes draw in, the grid fades up
- * on a plane set behind them (so the chart has depth), the target line shows; then the
- * curve draws itself, a bright head sweeping along it with the cursor, a soft veil of
- * light filling in under it; each level it reaches is marked by a ring that pops and a
- * dotted line dropping to the axis. Motes drift up through it all the while. Labels
- * (terrain.ts) name the target, the evolution followed and what to strengthen.
- */
 export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
   // Each point: x, y (0..1 on the chart), z (world units, depth), and kind + place in one float.
   const data: number[] = [];
-  const add = (x: number, y: number, z: number, kind: number, w = 0) => data.push(x, y, z, kind + Math.min(w, 0.999));
-  const line = (x0: number, y0: number, x1: number, y1: number, n: number, kind: number, z = 0) => {
-    for (let i = 0; i <= n; i++) add(x0 + (x1 - x0) * (i / n), y0 + (y1 - y0) * (i / n), z, kind, i / n);
-  };
-  line(0, 0, 1, 0, 90, AXIS); // time
-  line(0, 0, 0, 1, 52, AXIS); // value
-  for (let g = 1; g <= GRID_LINES; g++) line(0, g / (GRID_LINES + 0.6), 1, g / (GRID_LINES + 0.6), 50, GRID, -BACK);
-  for (let v = 1; v <= 6; v++) line(v / 6, 0, v / 6, 1, 26, GRID, -BACK);
+  const add = (x: number, y: number, z: number, kind: number, w = 0) => data.push(x, y, z, kind + Math.min(Math.max(w, 0), 0.999));
+  // The pillars: dotted lines, a little wider than the steps, behind the curve.
+  PILLAR_LEVELS.forEach((level) => {
+    for (let i = 0; i <= 74; i++) if (i % 2 === 0) add(-0.06 + (i / 74) * 1.12, level, -BACK, PILLAR, i / 74);
+  });
   for (let i = 0; i < CURVE_POINTS; i++) {
-    const t = i / (CURVE_POINTS - 1);
-    add(t, curveAt(t), 0, CURVE, t);
+    const x = i / (CURVE_POINTS - 1);
+    add(x, curveAt(x), 0, CURVE, x);
   }
-  // The target, dashed, there from the start.
-  for (let i = 0; i <= 70; i++) if (i % 3 !== 2) add(i / 70, TARGET_LEVEL, 0, TARGET, i / 70);
-  // A ring of points around each marked point of the curve, and a dotted drop to the axis.
-  for (const t of MONITOR_MARKS) {
-    for (let k = 0; k < 16; k++) {
-      const a = (k / 16) * Math.PI * 2;
-      add(t + (Math.cos(a) * 0.05) / (WIDTH / HEIGHT), curveAt(t) + Math.sin(a) * 0.05, 0, MARK, t);
+  // Each step: a ring (open, as on the site), and its heart, which fills once reached.
+  STEPS.forEach((step, s) => {
+    const x = stepAt(s);
+    for (let k = 0; k < 18; k++) {
+      const a = (k / 18) * Math.PI * 2;
+      add(x + (Math.cos(a) * 0.05) / (WIDTH / HEIGHT), step.level + Math.sin(a) * 0.05, 0, RING, x);
     }
-    const n = Math.round(curveAt(t) * 18);
-    for (let k = 0; k < n; k++) if (k % 2 === 0) add(t, curveAt(t) * (k / n), 0, DROP, t);
-  }
-  // A veil under the curve: columns of faint points, a little in depth.
-  for (let c = 0; c < FILL_COLUMNS; c++) {
-    const t = (c + 0.5) / FILL_COLUMNS;
-    const n = Math.max(1, Math.round(curveAt(t) * 9));
-    for (let k = 0; k < n; k++) add(t, (curveAt(t) * (k + 0.5)) / n, -BACK * ((k * 0.37 + c * 0.61) % 1) * 0.6, FILL, t);
-  }
-  // The frame's four corners, as on a screen of light.
+    add(x, step.level, 0.01, CORE, x);
+  });
+  // The frame's four corners, the brand's corner brackets.
   const corner = (x: number, y: number, dx: number, dy: number) => {
-    line(x, y, x + dx * 0.07, y, 6, FRAME, -BACK * 0.5);
-    line(x, y, x, y + dy * 0.12, 6, FRAME, -BACK * 0.5);
+    for (let i = 0; i <= 7; i++) add(x + dx * (i / 7) * 0.06, y, -BACK, FRAME, 0);
+    for (let i = 1; i <= 7; i++) add(x, y + dy * (i / 7) * 0.13, -BACK, FRAME, 0);
   };
-  corner(-0.04, -0.06, 1, 1);
-  corner(1.04, -0.06, -1, 1);
-  corner(-0.04, 1.08, 1, -1);
-  corner(1.04, 1.08, -1, -1);
-  for (let i = 0; i < MOTES; i++) add(((i * 0.618) % 1) * 1.1 - 0.05, (i * 0.377) % 1, -BACK * ((i * 0.29) % 1) * 1.4, MOTE, (i * 0.123) % 1);
-  const cursorPoints = 30;
-  for (let i = 0; i <= cursorPoints; i++) add(0, i / cursorPoints, 0, CURSOR, i / cursorPoints);
+  corner(-0.1, -0.16, 1, 1);
+  corner(1.1, -0.16, -1, 1);
+  corner(-0.1, 1.16, 1, -1);
+  corner(1.1, 1.16, -1, -1);
+  for (let i = 0; i < MOTES; i++) add(((i * 0.618) % 1) * 1.2 - 0.1, (i * 0.377) % 1, -BACK * 3 * ((i * 0.29) % 1), MOTE, (i * 0.123) % 1);
   const count = data.length / 4;
   const points = instancedArray(new Float32Array(data), 'vec4');
 
@@ -112,57 +113,45 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
   const kind = floor(point.w);
   const w = fract(point.w);
   const is = (k: number) => kind.equal(k);
-  // The cursor stands where the curve is drawing; the motes drift slowly up.
-  const x = is(CURSOR).select(reveal, point.x);
-  const y = is(MOTE).select(fract(point.y.add(time.mul(float(0.025).add(w.mul(0.03))))), point.y);
-  const local = vec3(x.sub(0.5).mul(WIDTH), y.mul(HEIGHT), point.z);
+  const y = is(MOTE).select(fract(point.y.add(time.mul(float(0.022).add(w.mul(0.03))))), point.y);
+  const local = vec3(point.x.sub(0.5).mul(WIDTH), y.mul(HEIGHT), point.z);
 
-  const material = new THREE.SpriteNodeMaterial({
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
+  const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
   material.positionNode = placement.mul(vec4(local, 1)).xyz;
-  // The axes and frame draw in from their origin, the grid fades up after them.
+  // The pillars and the frame draw in from the left.
   const built = smoothstep(w.sub(0.04), w, build);
-  // The curve is drawn up to `reveal`, its head bright; the veil follows it a little behind.
-  const drawn = smoothstep(reveal.add(0.004), reveal.sub(0.004), w);
-  const head = exp(abs(w.sub(reveal)).mul(-55));
-  const veiled = smoothstep(reveal, reveal.sub(0.06), w);
-  // A mark pops as the curve reaches it: it swells, then settles; its drop runs down after.
-  const sinceMark = reveal.sub(w);
-  const marked = smoothstep(0, 0.012, sinceMark);
-  const pop = exp(sinceMark.mul(-11)).mul(marked);
-  const dropped = smoothstep(0.01, 0.06, sinceMark);
-  const working = smoothstep(0, 0.02, reveal).mul(float(1).sub(smoothstep(0.98, 1, reveal)));
-  const strength = is(AXIS).select(built.mul(0.75),
-    is(GRID).select(smoothstep(0.6, 1, build).mul(0.36),
-      is(CURVE).select(drawn.mul(0.95).add(head.mul(1.6).mul(drawn)),
-        is(TARGET).select(built.mul(0.42),
-          is(MARK).select(marked.mul(0.75).add(pop.mul(0.9)),
-            is(DROP).select(dropped.mul(0.45),
-              is(FILL).select(veiled.mul(0.11),
-                is(FRAME).select(built.mul(0.7),
-                  is(MOTE).select(smoothstep(0, 0.15, y).mul(smoothstep(1, 0.75, y)).mul(0.28).mul(build),
-                    working.mul(0.26))))))))));
+  // The curve is drawn up to `reveal`, its head bright.
+  const drawn = smoothstep(reveal.add(0.003), reveal.sub(0.003), w);
+  const head = exp(abs(w.sub(reveal)).mul(-60)).mul(smoothstep(0, 0.01, reveal)).mul(float(1).sub(smoothstep(0.985, 1, reveal)));
+  // A step is reached when the curve gets to it: its ring brightens, its heart fills, briefly flaring.
+  const since = reveal.sub(w);
+  const reached = smoothstep(-0.004, 0.008, since);
+  const flare = exp(since.mul(-14)).mul(reached);
+  const strength = is(PILLAR).select(built.mul(0.38),
+    is(CURVE).select(drawn.mul(0.95).add(head.mul(1.5)),
+      is(RING).select(built.mul(0.35).add(reached.mul(0.45)).add(flare.mul(0.6)),
+        is(CORE).select(reached.mul(0.9).add(flare.mul(1.2)),
+          is(FRAME).select(built.mul(0.6),
+            smoothstep(0, 0.15, y).mul(smoothstep(1, 0.75, y)).mul(0.22).mul(build))))));
   const shape = particleShape();
-  const warm = is(CURVE).or(is(MARK)).or(is(FILL)).or(is(MOTE)).select(float(1), float(0));
-  material.colorNode = mix(color(CREAM).mul(0.8), color(WARM).mul(1.6), warm);
+  // Champagne light for what is drawn; the pillars and frame in off-white, quieter.
+  const lit = is(CURVE).or(is(RING)).or(is(CORE)).or(is(MOTE)).select(float(1), float(0));
+  material.colorNode = mix(color(LAB.dust).mul(0.75), color(BRAND.champagne).mul(1.5), lit);
   material.opacityNode = shape.alpha.mul(strength).mul(shown);
-  material.scaleNode = is(CURVE).select(float(0.13).add(head.mul(0.22).mul(drawn)),
-    is(MARK).select(float(0.09).add(pop.mul(0.1)),
-      is(FILL).select(float(0.11),
-        is(MOTE).select(float(0.06).add(hash(instanceIndex).mul(0.05)), float(0.075)))));
+  material.scaleNode = is(CURVE).select(float(0.12).add(head.mul(0.2)),
+    is(CORE).select(float(0.16).add(flare.mul(0.18)),
+      is(RING).select(float(0.075),
+        is(MOTE).select(float(0.05).add(hash(instanceIndex).mul(0.04)), float(0.07)))));
   const sprite = new THREE.Sprite(material);
   sprite.count = count;
   sprite.frustumCulled = false;
   scene.add(sprite);
 
-  // Under it, a soft pool of light on the ground, as from a projector: it stands on the land.
+  // Under it, a soft pool of light on the ground: it stands on the land.
   const poolMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
   const r = uv().sub(0.5).mul(2).length();
-  poolMaterial.colorNode = color(WARM).mul(0.9);
-  poolMaterial.opacityNode = exp(r.mul(r).mul(-4)).mul(smoothstep(1, 0.7, r)).mul(build).mul(shown).mul(0.35);
+  poolMaterial.colorNode = color(LAB.light).mul(0.9);
+  poolMaterial.opacityNode = exp(r.mul(r).mul(-4)).mul(smoothstep(1, 0.7, r)).mul(build).mul(shown).mul(0.3);
   const pool = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH * 1.1, 2.6).rotateX(-Math.PI / 2), poolMaterial);
   scene.add(pool);
 
@@ -181,9 +170,10 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
     const px = centerX(p) + offset * Math.cos(heading);
     const pz = -p + offset * Math.sin(heading);
     const ground = groundAt(px, pz);
-    position.set(px, ground + 0.75, pz);
+    // Raised so its lowest pillar stands clear of the horizon's light.
+    position.set(px, ground + (narrow ? 0.75 : 1.7), pz);
     // Turned towards the visitor coming up the path, a little in towards it.
-    rotation.setFromEuler(euler.set(0, -heading - (narrow ? 0.3 : 0.55), 0));
+    rotation.setFromEuler(euler.set(0, -heading - (narrow ? 0.3 : 0.32), 0));
     scale.setScalar(narrow ? 0.48 : 1);
     placement.value.compose(position, rotation, scale);
     // The pool's plane is laid flat in its geometry: it only turns with the chart.
@@ -194,16 +184,16 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
   place(false);
 
   const smooth = THREE.MathUtils.smoothstep;
-  const toWorld = (cx: number, cy: number) =>
-    new THREE.Vector3((cx - 0.5) * WIDTH, cy * HEIGHT, 0).applyMatrix4(placement.value);
+  const toWorld = (cx: number, cy: number, z = 0) =>
+    new THREE.Vector3((cx - 0.5) * WIDTH, cy * HEIGHT, z).applyMatrix4(placement.value);
   return {
-    /** World position of a point of the curve (0..1 along it), and of the target line's right end. */
-    curvePoint: (t: number) => toWorld(t, curveAt(t)),
-    targetEnd: () => toWorld(1, TARGET_LEVEL),
+    /** World position of a step's mark, and of a pillar's left end (where their labels stand). */
+    stepPoint: (i: number) => toWorld(stepAt(i), STEPS[i].level),
+    pillarEnd: (i: number) => toWorld(-0.06, PILLAR_LEVELS[i], -BACK),
     /** World position of its middle, where the eyes go. */
     centre: () => toWorld(0.5, 0.45),
-    /** The guide distance at which the curve reaches a point of it (0..1). */
-    distanceAt: (t: number) => CHART.draw[0] + t * (CHART.draw[1] - CHART.draw[0]),
+    /** The guide distance at which the curve reaches a point of it (0..1 across). */
+    distanceAt: (x: number) => CHART.draw[0] + x * (CHART.draw[1] - CHART.draw[0]),
     /** 0..1: how much it shows now. */
     get shown() { return shown.value; },
     /** From the guide's distance: it builds, draws its curve, stays to be read, and goes. */

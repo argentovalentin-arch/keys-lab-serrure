@@ -1,9 +1,10 @@
 import * as THREE from 'three/webgpu';
 import { attribute, color, float, uniform, uv } from 'three/tsl';
 import { END_AT, LANDMARKS, type TrajectoryPoint } from './path';
+import { LAB } from '../core/brand';
 
-const WARM = '#ffd9a0';
-const CREAM = '#f4ecdc';
+const WARM = LAB.light;
+const CREAM = LAB.dust;
 const POINTS = 240;
 /** Steering that counts as « all the way to a side » for the curve's variations. */
 const FULL_STEER = 1.25;

@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { SPRITE_GROWTH, coreColor, particleShape } from '../world/sprite';
+import { LAB } from '../core/brand';
 import {
   attribute, clamp, color, cos, float, hash, instanceIndex, length, mix, positionLocal, sin, smoothstep, uint, uniform, uv, vec3,
 } from 'three/tsl';
@@ -8,8 +9,8 @@ import {
   groundNode, lateralAt, type TrajectoryPoint,
 } from './path';
 
-const CREAM = '#f4ecdc';
-const WARM = '#ffd9a0';
+const CREAM = LAB.dust;
+const WARM = LAB.light;
 const LOW = '#8fa6c8'; // far below, in the haze
 const TOP_RADIUS = 9; // as in path.ts: the flat top
 const STEEPNESS = 1.6;

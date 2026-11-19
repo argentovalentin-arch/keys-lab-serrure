@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { color, max, positionWorld, smoothstep, uniform, vec4 } from 'three/tsl';
 import { KEY_DEPTH } from './shapes';
 import { DISSOLVE_EDGE, buildFront, dissolveField, dissolveProgress, leafInverse } from './dissolve';
+import { LAB } from '../core/brand';
 
 /** Front face of the door, on the x axis: the key points straight at it. */
 export const DOOR_X = 2.6;
@@ -41,7 +42,7 @@ export function createDoor(logo: THREE.Texture | null = null) {
     const field = dissolveField(leafInverse.mul(vec4(positionWorld, 1)).xyz, LEAF.width);
     const front = max(buildFront, dissolveProgress);
     m.maskNode = field.greaterThan(front);
-    m.emissiveNode = color('#ffd9a0').mul(smoothstep(front.add(DISSOLVE_EDGE), front, field)).mul(2);
+    m.emissiveNode = color(LAB.light).mul(smoothstep(front.add(DISSOLVE_EDGE), front, field)).mul(2);
     return m;
   };
 
@@ -60,11 +61,12 @@ export function createDoor(logo: THREE.Texture | null = null) {
   // The light beyond the doorway; it only shows once the door opens.
   const glow = uniform(0);
   const lightMaterial = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
-  lightMaterial.colorNode = color('#fff1d6').mul(glow.mul(1.6));
+  // Champagne, the Lab's light: burned bright, it reads as warm white, never grey.
+  lightMaterial.colorNode = color(LAB.light).mul(glow.mul(1.8));
   const lightPanel = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), lightMaterial);
   lightPanel.rotation.y = -Math.PI / 2;
   lightPanel.position.x = DOOR_X + 3;
-  const spill = new THREE.PointLight('#ffd9a0', 0, 30, 1.2);
+  const spill = new THREE.PointLight(LAB.light, 0, 30, 1.2);
   spill.position.set(DOOR_X + 1, 0, 0);
   group.add(lightPanel, spill);
 

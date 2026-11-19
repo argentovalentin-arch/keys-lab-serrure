@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { color, float, hash, instanceIndex, mix, mx_noise_vec3, sin, smoothstep, uint, uniform, vec3 } from 'three/tsl';
 import { DOOR_X } from './door';
 import { SPRITE_GROWTH, coreColor, particleShape, twinkle } from './sprite';
+import { LAB } from '../core/brand';
 
 /**
  * The open door's breath: a current of gold particles coming out of the doorway, out of
@@ -51,7 +52,7 @@ export function createDoorStream(count: number, reducedMotion: boolean) {
   });
   material.positionNode = along.add(curl);
   const shape = particleShape();
-  material.colorNode = coreColor(mix(color('#ffd9a0'), color('#f4ecdc'), seed(9).mul(0.6)), shape.core);
+  material.colorNode = coreColor(mix(color(LAB.light), color(LAB.dust), seed(9).mul(0.6)), shape.core);
   // In out of the light, out before the visitor; each at its own shimmer.
   const life = smoothstep(0, 0.14, t).mul(smoothstep(1, 0.62, t));
   material.opacityNode = shape.alpha.mul(life).mul(twinkle(time, seed(10), 0.35)).mul(intensity).mul(1.15);

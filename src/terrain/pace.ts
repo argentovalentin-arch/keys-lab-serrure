@@ -72,15 +72,15 @@ export const LEVERS = {
 /** « Mesurer pour décider »'s chart, on the right before the summit: the eyes go to it a little. */
 export const CHART = {
   /** Where it stands along the path, and how far right of the lane (narrow screens: closer). */
-  at: 190,
-  offset: 5.4,
+  at: 193,
+  offset: 6.4,
   narrowOffset: 2.6,
   /** Guide distances: frame and axes draw in, the curve draws, it stays, it goes. */
   build: [172, 174.5] as const,
   draw: [174.5, 181.5] as const,
-  gone: [188.5, 191] as const,
-  look: [172.5, 176.5, 187.5, 190.5] as const,
-  lookAmount: 0.55,
+  gone: [189.5, 192] as const,
+  look: [172.5, 176.5, 188.5, 191.5] as const,
+  lookAmount: 0.62,
 } as const;
 
 /**

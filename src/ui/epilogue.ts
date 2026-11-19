@@ -47,13 +47,14 @@ export class Epilogue {
   private readonly wordName = document.querySelector<HTMLElement>('#terrain-word-name')!;
   private readonly note = document.querySelector<HTMLElement>('#terrain-note')!;
   private readonly tagLayer = document.querySelector<HTMLElement>('#terrain-tags')!;
-  private readonly tagElements = new Map<string, { root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number }>();
+  private readonly tagElements = new Map<string, { root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number; clear: number }>();
   private noteText: string | null = null;
   // Sizes read from the page once, not every frame: reading layout right after moving
   // elements forces the browser to lay the page out again, several times a frame.
   private noteSize: { width: number; height: number } | null = null;
   private noteBox: Box | null = null;
   private wordBoxes: Box[] | null = null;
+  private closeBox: Box | null = null;
   private readonly close = document.querySelector<HTMLButtonElement>('#terrain-close')!;
   private readonly end = document.querySelector<HTMLElement>('#terrain-end')!;
   private readonly replay = document.querySelector<HTMLButtonElement>('#terrain-replay')!;
@@ -72,6 +73,7 @@ export class Epilogue {
     window.addEventListener('resize', () => {
       this.noteSize = null;
       this.wordBoxes = null;
+      this.closeBox = null;
       for (const element of this.tagElements.values()) element.width = element.height = -1;
     });
     window.addEventListener('keydown', (e) => {
@@ -224,7 +226,7 @@ export class Epilogue {
     // Where it stands on screen, for the labels to keep clear of (see showTags).
     const left = x - (view.align === -1 ? width : view.align === 1 ? 0 : width / 2);
     const height = this.noteSize.height * view.scale;
-    this.noteBox = view.opacity > 0.05 ? { left: left - 12, right: left + width + 12, top: y - height / 2 - 10, bottom: y + height / 2 + 10 } : null;
+    this.noteBox = view.opacity > 0.01 ? { left: left - 12, right: left + width + 12, top: y - height / 2 - 10, bottom: y + height / 2 + 10 } : null;
   }
 
   /**
@@ -249,6 +251,14 @@ export class Epilogue {
       placed.push(...this.wordBoxes);
     }
     if (this.noteBox) placed.push(this.noteBox);
+    // Nor under « Quitter le Terrain » (on a phone the labels come up that far).
+    if (views.length) {
+      if (!this.closeBox) {
+        const r = this.close.getBoundingClientRect();
+        this.closeBox = { left: r.left - 8, right: r.right + 8, top: r.top - 8, bottom: r.bottom + 8 };
+      }
+      placed.push(this.closeBox);
+    }
     // Nearest first (lowest on screen), so the farther ones are the ones moved up.
     const ordered = [...views].sort((p, q) => q.ly - p.ly);
     for (const view of ordered) {
@@ -271,7 +281,7 @@ export class Epilogue {
         label.append(badge, caption);
         root.append(thread, label);
         this.tagLayer.append(root);
-        element = { root, thread, label, width: -1, height: -1 };
+        element = { root, thread, label, width: -1, height: -1, clear: 1 };
         this.tagElements.set(view.id, element);
       }
       if (element.width < 0) {
@@ -301,10 +311,14 @@ export class Epilogue {
         const free = candidates.find((y) => !hits(y));
         ly = free ?? candidates[0] ?? above;
       }
-      placed.push({ left: lx - half - 4, right: lx + half + 4, top: ly - height, bottom: ly });
+      // Where there is no free room at all (a crowded phone screen), the label steps back,
+      // fading out until there is, rather than lying over a text.
+      const blocked = Boolean(hits(ly));
+      element.clear += ((blocked ? 0 : 1) - element.clear) * 0.18;
+      if (!blocked) placed.push({ left: lx - half - 4, right: lx + half + 4, top: ly - height, bottom: ly });
       element.root.style.transform = `translate(${lx.toFixed(1)}px, ${ly.toFixed(1)}px)`;
       // Secondary to the note: never quite as bright.
-      element.root.style.opacity = (view.opacity * 0.92).toFixed(3);
+      element.root.style.opacity = (view.opacity * 0.92 * element.clear).toFixed(3);
       // The thread runs from the label down to its point.
       const length = Math.hypot(gx - lx, gy - ly);
       const angle = Math.atan2(gy - ly, gx - lx);

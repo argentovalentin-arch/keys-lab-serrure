@@ -199,6 +199,8 @@ const noteEnvelope = (topic: NoteTopic, distance: number) => {
 // Notes (notes.ts): how far beside the path they stand, and how high; on narrow screens
 // they stand over the path, a little higher. At the reference depth they show at base size.
 const NOTE_BESIDE = 5;
+/** On a phone, how far a label is drawn from its point towards the route's centre line. */
+const LABEL_PULL = 0.6;
 const NOTE_HEIGHT = 2.6;
 const NOTE_OVER = 4.2;
 const NOTE_REFERENCE_DEPTH = 20;
@@ -444,6 +446,8 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     return new THREE.Vector3(x, groundAt(x, -p), -p);
   };
   const tags: Tag[] = [];
+  /** Portrait phone screen this frame: the labels keep close to the route (see placeTags). */
+  let narrowView = false;
   // « Comprendre avant de proposer »: look closely, what blocks, what already works; in
   // the swept ground, on either side.
   const understand = noteStretch('understand');
@@ -451,7 +455,10 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   ([['search', 'Votre situation'], ['alert', 'Ce qui bloque'], ['check', 'Ce qui fonctionne']] as [IconName, string][]).forEach(([icon, caption], i) => {
     const appear = along('understand', BADGES_AT) + i * 3.4;
     const place = besidePath(appear + 12, (i % 2 ? 1 : -1) * 4.4);
-    tags.push({ id: `understand-${i}`, marker: true, icons: [icon], caption, ground: () => place, lift: 1.3, strength: onRide(appear, understand.to + 1) });
+    // On a phone, right beside where the lane will run (it has not formed yet here), so
+    // they read as marks along the route rather than out in the field.
+    const close = besidePath(appear + 12, (i % 2 ? 1 : -1) * (PATH_HALF + 0.9));
+    tags.push({ id: `understand-${i}`, marker: true, icons: [icon], caption, ground: () => (narrowView ? close : place), lift: 1.3, strength: onRide(appear, understand.to + 1) });
   });
   // « Clarifier les fondations »: positioning and targets, priorities, journey, roadmap;
   // on the walls, as they build.
@@ -676,6 +683,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     // Portrait phone screens: the same light takes up far more of the screen there, and
     // overlaps the words. Beacons, horizon and glow are toned down, the gate comes later.
     const narrow = camera.aspect < 0.9;
+    narrowView = narrow;
     const calm = narrow ? 0.55 : 1;
     // A little faster after each landmark, eased in; at the end, a glide to a stop.
     const passed = LANDMARKS.filter((landmark) => distance >= landmark.at).length;
@@ -826,6 +834,12 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       if (opacity < 0.01) continue;
       tagGround.copy(tag.ground());
       tagLabel.copy(tagGround).setY(tagGround.y + tag.lift);
+      if (narrowView) {
+        // On a phone the label stands over the route rather than out to the side: drawn
+        // most of the way towards the centre line at that point of the path (its thread
+        // still reaches its own point), so it follows the route's bends.
+        tagLabel.x = THREE.MathUtils.lerp(tagLabel.x, centerX(-tagGround.z), LABEL_PULL);
+      }
       const depth = -tagDepth.copy(tagLabel).applyMatrix4(camera.matrixWorldInverse).z;
       if (depth < 1) continue;
       tagGround.project(camera);

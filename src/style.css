@@ -326,7 +326,6 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
   align-items: center;
   gap: 6px;
   transform: translateX(-50%);
-  animation: terrain-tag-pop 0.65s cubic-bezier(0.2, 1.5, 0.4, 1) both;
 }
 .terrain-tag__badge {
   position: relative;
@@ -384,8 +383,131 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
   background: repeating-linear-gradient(90deg, rgba(233, 215, 180, 0.75) 0 2px, transparent 2px 6px);
   animation: terrain-tag-thread 0.5s ease both;
 }
-@keyframes terrain-tag-pop {
-  from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(0.6); }
+/* « L'épure lumineuse »: a badge is projected, never popped (its half in the scene is
+   projection.ts, timed from the same moment). Out of the point of light on the ground and
+   the line rising from it (0 – 0.6 s):
+   0.45 s its corner brackets open out from its centre, the frame set first;
+   0.55 s a champagne scan line runs down it, the pictograms drawn as it passes, while the
+          backing and the hairline come in;
+   0.72 s the words' backing wipes in, then the words settle one by one, out of a slight
+          blur, always ending sharp: readable by about 1 s;
+   0.75 s while it is the badge in focus, its hologram rises over it (ui/holograms.ts):
+          its base first, then its drawing, which then holds to be read;
+   1.15 s one soft glow on the brackets, and the badge holds, still. */
+.terrain-tag__icons { display: flex; gap: 7px; animation: terrain-scan-reveal 0.45s cubic-bezier(0.3, 0.6, 0.3, 1) 0.55s both; }
+.terrain-tag__scan {
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  top: 0;
+  height: 1px;
+  background: var(--champagne);
+  box-shadow: 0 0 6px 1px rgba(233, 215, 180, 0.75);
+  opacity: 0;
+  pointer-events: none;
+  animation: terrain-scan 0.45s cubic-bezier(0.3, 0.6, 0.3, 1) 0.55s both;
+}
+.terrain-tag--badge .terrain-tag__badge { animation: terrain-badge-in 0.4s ease 0.55s both; }
+.terrain-tag--badge .terrain-tag__badge::before {
+  animation: terrain-frame-in 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) 0.45s both, terrain-frame-settle 0.9s ease 1.15s both;
+}
+.terrain-tag__word { display: inline-block; animation: terrain-word-in 0.4s ease both; animation-delay: calc(0.78s + var(--i, 0) * 70ms); }
+/* The hologram over the badge: a soft shade of the night behind it so its lines read on
+   the lit ground, and a hairline down to the badge it rises from. */
+.terrain-tag__holo {
+  position: relative;
+  display: block;
+  margin-bottom: 9px;
+  isolation: isolate;
+  transform-origin: 50% 100%;
+  animation: terrain-holo-in 0.45s ease 0.65s both;
+}
+.terrain-tag__holo::before {
+  content: '';
+  position: absolute;
+  inset: -16px -22px -6px;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(5, 9, 17, 0.66), rgba(5, 9, 17, 0.34) 62%, transparent);
+  pointer-events: none;
+}
+.terrain-tag__holo::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  width: 1px;
+  height: 9px;
+  background: linear-gradient(rgba(233, 215, 180, 0.75), rgba(233, 215, 180, 0.2));
+}
+.terrain-tag__holo canvas { display: block; }
+@keyframes terrain-holo-in {
+  from { opacity: 0; }
+}
+@keyframes terrain-scan-reveal {
+  from { clip-path: inset(0 0 100% 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@keyframes terrain-scan {
+  0% { top: 0; opacity: 0; }
+  15%, 85% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+@keyframes terrain-badge-in {
+  from { background-color: transparent; border-color: transparent; }
+}
+@keyframes terrain-frame-in {
+  from { opacity: 0; transform: scale(0.35); }
+}
+@keyframes terrain-frame-settle {
+  0%, 100% { filter: none; }
+  35% { filter: drop-shadow(0 0 4px rgba(233, 215, 180, 0.95)); }
+}
+@keyframes terrain-word-in {
+  from { opacity: 0; filter: blur(3px); transform: translateY(2px); }
+}
+/* What it names is done (a lever thrown): its open brackets close into a whole champagne
+   frame, drawn in from a little larger, with one glow, and its square mark lights. */
+.terrain-tag__badge::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid var(--champagne);
+  opacity: 0;
+  pointer-events: none;
+}
+.terrain-tag.is-confirmed .terrain-tag__badge::after { opacity: 1; animation: terrain-confirm 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.terrain-tag.is-confirmed .terrain-tag__caption::before { box-shadow: 0 0 6px rgba(233, 215, 180, 0.95); }
+@keyframes terrain-confirm {
+  0% { opacity: 0; transform: scale(1.4); }
+  45% { opacity: 1; box-shadow: 0 0 14px 2px rgba(233, 215, 180, 0.7); }
+  100% { opacity: 1; transform: scale(1); box-shadow: 0 0 5px rgba(233, 215, 180, 0.3); }
+}
+/* The method chart's numerals are drawn, not popped: written in from the left over a
+   champagne rule that draws under them; their names follow. */
+.terrain-tag__numeral { position: relative; animation: terrain-write 0.5s cubic-bezier(0.3, 0.6, 0.3, 1) both; }
+.terrain-tag__numeral::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 1px;
+  background: var(--champagne);
+  opacity: 0.7;
+  transform-origin: left;
+  animation: terrain-rule-in 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) 0.2s both;
+}
+@keyframes terrain-write {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@keyframes terrain-rule-in {
+  from { transform: scaleX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terrain-tag__scan { display: none; }
+  .terrain-tag__icons, .terrain-tag__word, .terrain-tag--badge .terrain-tag__badge, .terrain-tag--badge .terrain-tag__badge::before,
+  .terrain-tag__numeral, .terrain-tag__numeral::after { animation-duration: 0.01s; animation-delay: 0.3s; }
 }
 /* The method chart's labels (monitor.ts), set as on the brand's site: a step's numeral in
    Bodoni over its name in spaced capitals; a pillar's name alone, quieter; no frame. */
@@ -408,10 +530,16 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
    champagne on the Lab's night, where prune would not read). */
 .terrain-tag__caption::before { content: ''; width: 5px; height: 5px; flex: none; background: var(--champagne); }
 /* What the badge shows comes first, the words naming it a moment after: the eye goes to
-   the badge, then reads. */
-.terrain-tag__caption { animation: terrain-caption-in 0.55s ease 0.5s both; }
+   the badge, then reads. Their backing wipes in, then the words settle (above). */
+.terrain-tag__caption { animation: terrain-caption-in 0.35s cubic-bezier(0.3, 0.6, 0.3, 1) 0.72s both; }
+/* A step's name and a pillar's come with their numeral, sooner. */
+.terrain-tag--step .terrain-tag__caption { animation-delay: 0.3s; }
+.terrain-tag--step .terrain-tag__word { animation-delay: calc(0.35s + var(--i, 0) * 90ms); }
+.terrain-tag--pillar .terrain-tag__caption { animation-delay: 0s; animation-duration: 0.7s; }
+.terrain-tag--pillar .terrain-tag__word { animation-delay: 0.1s; }
 @keyframes terrain-caption-in {
-  from { opacity: 0; transform: translateY(-4px); }
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
 }
 @media (prefers-reduced-motion: reduce) {
   .terrain-tag__caption { animation-duration: 0.01s; animation-delay: 0.3s; }

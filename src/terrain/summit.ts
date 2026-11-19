@@ -1,18 +1,16 @@
 import * as THREE from 'three/webgpu';
 import {
-  color, exp, float, instancedBufferAttribute, max, mix, normalView, normalWorld, pow, smoothstep, texture, uniform, uv, vec3,
+  abs, color, exp, float, instancedBufferAttribute, normalView, positionLocal, pow, smoothstep, uniform, uv,
 } from 'three/tsl';
 import { buildKeyGeometry } from '../world/keyMesh';
 import { bowHangPoint } from '../world/shapes';
-import { LAB } from '../core/brand';
+import { graduatedRing } from './projection';
+import { BRAND, LAB } from '../core/brand';
 
 const WARM = LAB.light;
 const ARC_POINTS = 80;
 
 const smooth = THREE.MathUtils.smoothstep;
-const LIGHT = vec3(0.35, 0.85, 0.4).normalize();
-/** The highlight's direction, in view space (from the upper left, towards the eye). */
-const SHINE = vec3(-0.35, 0.45, 0.82).normalize();
 
 export interface SummitTiming {
   /** When each action badge comes in (seconds after the stop), in order. */
@@ -25,9 +23,10 @@ export interface SummitTiming {
  *   column of light rises ahead, where the key ring will hang, the climb's end marked like
  *   its landmarks; it settles to a thread of light before the note comes in;
  * - then, as each action badge comes in (terrain.ts), an arc of particles rises from it to
- *   a key, in the « k. » design of the key that opened the door: one key per action;
- * - once all are there, the keys gather on a ring with a Keys tag: the key ring, every
- *   result held together, each linked to an action below.
+ *   a key of light, in the « k. » design of the key that opened the door: one key per
+ *   action, the badge's hologram (« l'épure lumineuse »);
+ * - once all are there, the keys gather on a ring that is the brand's graduated rule, at
+ *   the crown's apex (crown.ts): every action held together.
  */
 export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
   const since = uniform(-1);
@@ -92,12 +91,16 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
   arcs.visible = false;
   scene.add(arcs);
 
-  // ---- The key ring: one key per action, in the « k. » design of the key that opened the
-  // door (shapes.ts, keyMesh.ts). Each key appears where its arc arrives; once all are
-  // there, they go and hang together on a split ring, with a tag bearing the Keys wordmark.
-  // Then the ring comes to the visitor, as if now in their hand: it stays with them through
-  // the half-turn, the keys swinging from it, then is carried across, left to right, the
-  // keys swaying and settling, before it is lowered out of view for the curve.
+  // ---- The key ring, made of the Lab's own light (« l'épure lumineuse »): one key per
+  // action, in the « k. » design of the key that opened the door (shapes.ts, keyMesh.ts),
+  // drawn as light through glass: its edges champagne, its faces barely there. Each key forms
+  // where its arc arrives, from there out to its tip and its bow, as the door's key formed
+  // out of the particles. Once all are there they hang together on a ring that is the
+  // brand's graduated rule: the actions held together, each key still tied by its arc to the
+  // action it came from until the ring is taken. Then the ring comes to the visitor, as if now in their
+  // hand: it stays with them through the half-turn, the keys swinging from it, then is
+  // carried across, left to right, the keys swaying and settling, before it is lowered out
+  // of view for the curve.
   const keyGeometry = buildKeyGeometry();
   const KEY_SCALE = 0.62;
   // Where a key hangs: in the crotch of the « k »'s branches (centred key space).
@@ -107,24 +110,32 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
   const toWeight = keyCentre.clone().sub(hangPoint);
   const REST = -Math.PI / 2 - Math.atan2(toWeight.y, toWeight.x);
   const held = uniform(1); // 1 until the ring is lowered out of view
+  const inHand = uniform(0); // 0 at the top, 1 once taken in hand
   /**
-   * Brass, lit from a fixed direction (the Terrain has no lights): a diffuse gradient, a
-   * tight highlight where the surface faces the light back to the eye, and a warm edge
-   * where it turns away (the bevels catch it), so the metal reads as metal. Warmer when
-   * `glow` rises.
+   * Light through glass: bright where the surface turns away from the eye (its edges and
+   * bevels), faint where it faces it. `reveal` (0..1), if given, draws the key from its
+   * middle (where its arc arrives) out to both ends, a bright front running ahead.
    */
-  const brass = (glow: THREE.Node<'float'>, fade: THREE.Node<'float'>) => {
-    const material = new THREE.MeshBasicNodeMaterial({ transparent: true });
-    const diffuse = mix(color('#4a3c26'), color('#d9bf8a'), normalWorld.dot(LIGHT).mul(0.5).add(0.5));
-    const highlight = pow(max(normalView.dot(SHINE), 0), 28).mul(0.85);
-    const edge = pow(float(1).sub(normalView.z.abs()), 3).mul(0.45);
-    material.colorNode = diffuse.add(color(LAB.lightCore).mul(highlight)).add(color(WARM).mul(edge))
-      .add(color(WARM).mul(glow.mul(0.9)));
-    material.opacityNode = fade.mul(held);
+  const lightGlass = (glow: THREE.Node<'float'>, fade: THREE.Node<'float'>, reveal?: THREE.Node<'float'>) => {
+    const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const rim = pow(float(1).sub(normalView.z.abs()), 2.2);
+    let shown: THREE.Node<'float'> = float(1);
+    let front: THREE.Node<'float'> = float(0);
+    if (reveal) {
+      // Out to its farthest point: the back of the medallion, 3.15 from the middle.
+      const away = abs(positionLocal.x.sub(keyCentre.x));
+      const reach = reveal.mul(3.3);
+      shown = smoothstep(reach.add(0.06), reach.sub(0.06), away);
+      front = exp(away.sub(reach).div(0.08).pow(2).negate()).mul(float(1).sub(smoothstep(0.9, 1, reveal)));
+    }
+    // Fainter in hand, close to the eye, where several keys overlap.
+    material.colorNode = color(BRAND.champagne).mul(rim.mul(1.25).add(0.07).add(front.mul(1.6)))
+      .add(color(LAB.lightCore).mul(glow.mul(0.5))).mul(float(1).sub(inHand.mul(0.3)));
+    material.opacityNode = fade.mul(held).mul(shown.max(front));
     return material;
   };
-  const gather = arcStarts[arcStarts.length - 1] + ARC_DRAW + 0.25;
-  const GATHER_OVER = 1;
+  const gather = arcStarts[arcStarts.length - 1] + ARC_DRAW + 0.2;
+  const GATHER_OVER = 0.85;
   const RING_RADIUS = 0.8;
 
   /** Everything on the ring moves with it: at the top first, then in the visitor's hand. */
@@ -134,7 +145,8 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
   const keys = badgesAt.map((_, i) => {
     const fade = uniform(0);
     const glow = uniform(0);
-    const material = brass(glow, fade);
+    const reveal = uniform(0);
+    const material = lightGlass(glow, fade, reveal);
     const mesh = new THREE.Mesh(keyGeometry, material);
     mesh.scale.setScalar(KEY_SCALE);
     mesh.position.copy(hangPoint).multiplyScalar(-KEY_SCALE);
@@ -146,59 +158,33 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
     bunch.add(pivot);
     // Threaded at different points of the ring's lower half, each turned a little its own
     // way, as keys on a ring are, not lined up flat.
-    const along = (i - 1) * 0.42;
+    const along = (i - 1) * 0.62;
     return {
-      pivot, material, fade, glow, along, turn: [-0.45, 0.2, 0.6][i] ?? 0,
+      pivot, material, fade, glow, reveal, along, turn: [-0.45, 0.2, 0.6][i] ?? 0,
       // A little apart in depth along the ring's wire, so they never pass through each other.
       spread: new THREE.Vector3(), hang: new THREE.Vector3(Math.sin(along) * RING_RADIUS, -Math.cos(along) * RING_RADIUS, (i - 1) * 0.16),
       swing: 0, swingSpeed: 0,
     };
   });
-  // A split ring: two turns of wire, a little apart.
+  // The ring: a fine ring of the same light, and round it the brand's graduated rule.
   const ringFade = uniform(0);
-  const ringMaterial = brass(float(0.15), ringFade);
-  const ringGeometry = new THREE.TorusGeometry(RING_RADIUS, 0.042, 14, 96);
+  const ringMaterial = lightGlass(float(0.15), ringFade);
+  const ringGeometry = new THREE.TorusGeometry(RING_RADIUS, 0.03, 12, 96);
   const ring = new THREE.Group();
-  const turnA = new THREE.Mesh(ringGeometry, ringMaterial);
-  const turnB = new THREE.Mesh(ringGeometry, ringMaterial);
-  turnA.position.z = -0.042;
-  turnB.position.z = 0.042;
-  turnA.rotation.x = -0.05;
-  turnB.rotation.set(0.05, 0, 0.35);
-  ring.add(turnA, turnB);
+  const ringWire = new THREE.Mesh(ringGeometry, ringMaterial);
+  const ruleMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+  ruleMaterial.colorNode = color(BRAND.champagne).mul(1.3);
+  ruleMaterial.opacityNode = graduatedRing().mul(ringFade).mul(held).mul(0.85);
+  // The rule's hairline sits at 0.97 of the plane's half-size: on the wire, its ticks inside.
+  const rule = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), ruleMaterial);
+  rule.scale.setScalar((RING_RADIUS * 2.36) / 0.97);
+  ring.add(ringWire, rule);
   ring.visible = false;
   bunch.add(ring);
-  // The tag: a navy disc with a brass rim and the Keys wordmark (public/keys-wordmark-cream.png),
-  // on its own small ring, swinging like the keys.
-  const tagFade = uniform(0);
-  const tag = new THREE.Group();
-  const discMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true });
-  discMaterial.colorNode = color('#14213a');
-  discMaterial.opacityNode = tagFade.mul(held);
-  const rimMaterial = brass(float(0.1), tagFade);
-  const logo = new THREE.TextureLoader().load('keys-wordmark-cream.png');
-  logo.colorSpace = THREE.SRGBColorSpace;
-  const logoMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
-  logoMaterial.colorNode = texture(logo).rgb;
-  logoMaterial.opacityNode = texture(logo).a.mul(tagFade).mul(held);
-  const tagDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.07, 48).rotateX(Math.PI / 2), discMaterial);
-  const tagRim = new THREE.Mesh(new THREE.TorusGeometry(0.66, 0.04, 10, 64), rimMaterial);
-  const tagMark = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.4), logoMaterial);
-  const tagLoop = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.03, 8, 24), rimMaterial);
-  tagMark.position.z = 0.045;
-  tagDisc.position.y = tagRim.position.y = tagMark.position.y = -0.92;
-  tagLoop.position.y = -0.14;
-  tag.add(tagLoop, tagDisc, tagRim, tagMark);
-  tag.visible = false;
-  bunch.add(tag);
-  const TAG_AT = 1.05; // where on the ring the tag hangs
-  tag.position.set(Math.sin(TAG_AT) * RING_RADIUS, -Math.cos(TAG_AT) * RING_RADIUS, 0.02);
-  let tagSwing = 0;
-  let tagSwingSpeed = 0;
 
   // In the hand: where the ring sits in front of the camera (camera space), how big.
   const HAND = new THREE.Vector3(0, -0.55, -3.4);
-  const HAND_SCALE = 0.3;
+  const HAND_SCALE = 0.27;
   const HAND_SWAY = 1.15; // carried from this far left to as far right
   const ringCentre = new THREE.Vector3();
   const atTop = new THREE.Quaternion();
@@ -303,6 +289,7 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
       bunch.position.lerpVectors(ringCentre, handPos, take);
       bunch.quaternion.slerpQuaternions(atTop, handQuat, take);
       bunch.scale.setScalar(THREE.MathUtils.lerp(1, handScale, take));
+      inHand.value = take;
       // What drives the keys' swing: the hand's sideways acceleration, and the camera turning.
       const handSpeed = dt > 0 ? (handX - lastHandX) / dt : 0;
       const handAccel = dt > 0 ? (handSpeed - lastHandSpeed) / dt : 0;
@@ -323,9 +310,10 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
       const together = smooth(s, gather, gather + GATHER_OVER);
       keys.forEach((key, i) => {
         const arrive = arcStarts[i] + ARC_DRAW;
-        key.fade.value = on ? smooth(s, arrive - 0.15, arrive + 0.25) : 0;
-        key.glow.value = Math.exp(-(((s - arrive) / 0.3) ** 2)) + together * 0.12;
-        const pop = 1 + 0.25 * Math.exp(-(((s - arrive - 0.15) / 0.18) ** 2));
+        key.fade.value = on ? smooth(s, arrive - 0.15, arrive + 0.05) : 0;
+        key.reveal.value = on ? THREE.MathUtils.clamp((s - arrive + 0.1) / 0.7, 0, 1) : 0;
+        key.glow.value = Math.exp(-(((s - arrive - 0.5) / 0.35) ** 2)) * 0.8 + together * 0.1;
+        const pop = 1 + 0.08 * Math.exp(-(((s - arrive - 0.6) / 0.2) ** 2));
         // In the row the key's middle sits at its spot; on the ring, its hang point does.
         offset.copy(hangPoint).sub(keyCentre).multiplyScalar(KEY_SCALE * pop).add(key.spread);
         key.pivot.position.lerpVectors(offset, key.hang, together);
@@ -342,14 +330,9 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
         }
       });
       if (together > 0 && gone.value > 0.001) positions.needsUpdate = true;
-      if (dt > 0 && together >= 1) [tagSwing, tagSwingSpeed] = pendulum(tagSwing, tagSwingSpeed, push * 0.9, dt);
-      if (!on) tagSwing = tagSwingSpeed = 0;
-      tag.rotation.z = tagSwing;
 
       ringFade.value = on ? smooth(s, gather - 0.4, gather + 0.2) : 0;
-      tagFade.value = on ? smooth(s, gather + GATHER_OVER - 0.2, gather + GATHER_OVER + 0.5) : 0;
       ring.visible = ringFade.value > 0.001;
-      tag.visible = tagFade.value > 0.001;
       bunch.visible = on && held.value > 0.001 && keys.some((k) => k.fade.value > 0.001);
       wave.visible = waveFade.value > 0.001;
       beam.visible = beamFade.value > 0.001;
@@ -360,11 +343,9 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
       beam.geometry.dispose();
       keyGeometry.dispose();
       ringGeometry.dispose();
-      for (const mesh of [tagDisc, tagRim, tagMark, tagLoop]) mesh.geometry.dispose();
-      logo.dispose();
+      rule.geometry.dispose();
       const materials = [
-        waveMaterial, beamMaterial, arcMaterial, ringMaterial, discMaterial, rimMaterial, logoMaterial,
-        ...keys.map((k) => k.material),
+        waveMaterial, beamMaterial, arcMaterial, ringMaterial, ruleMaterial, ...keys.map((k) => k.material),
       ];
       for (const material of materials) material.dispose();
     },

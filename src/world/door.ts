@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { color, max, positionWorld, smoothstep, uniform, vec4 } from 'three/tsl';
+import { color, exp, max, mx_noise_float, positionWorld, smoothstep, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { KEY_DEPTH } from './shapes';
 import { DISSOLVE_EDGE, buildFront, dissolveField, dissolveProgress, leafInverse } from './dissolve';
 import { LAB } from '../core/brand';
@@ -60,9 +60,16 @@ export function createDoor(logo: THREE.Texture | null = null) {
 
   // The light beyond the doorway; it only shows once the door opens.
   const glow = uniform(0);
+  const time = uniform(0);
   const lightMaterial = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
-  // Champagne, the Lab's light: burned bright, it reads as warm white, never grey.
-  lightMaterial.colorNode = color(LAB.light).mul(glow.mul(1.8));
+  // Champagne, the Lab's light. It has a heart, deep behind the opening, burned to warm
+  // white, and softer edges, golden: a light with depth rather than a flat white sheet, and
+  // one the particles leaving it (doorStream.ts) can be seen against, from where they are
+  // born. Its haze moves, slowly: the light is alive.
+  const fromHeart = positionWorld.yz.sub(vec2(0.4, 0)).div(vec2(3.1, 3.6));
+  const heart = exp(fromHeart.dot(fromHeart).negate());
+  const haze = mx_noise_float(vec3(positionWorld.y.mul(0.35), positionWorld.z.mul(0.35), time.mul(0.12))).mul(0.12);
+  lightMaterial.colorNode = color(LAB.light).mul(glow.mul(heart.mul(1.25).add(0.6).add(haze)));
   const lightPanel = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), lightMaterial);
   lightPanel.rotation.y = -Math.PI / 2;
   lightPanel.position.x = DOOR_X + 3;
@@ -168,6 +175,17 @@ export function createDoor(logo: THREE.Texture | null = null) {
   plug.add(plugFace, slot);
   leaf.add(plug);
 
+  // The wall, its casing and the door are see-through materials (they fade in), so three.js
+  // sorts them among the other transparent objects by their centre's depth. The wall's
+  // slabs are huge: the one right of the doorway and the one above it have their centre
+  // close to the camera's depth, and were drawn after the particles, which write no depth,
+  // painting over every particle in front of them. That is what held the particles inside
+  // the door's outline, on the right and above. Drawn first, the wall and door only hide
+  // what is really behind them.
+  group.traverse((object) => {
+    if ((object as THREE.Mesh).isMesh) object.renderOrder = -1;
+  });
+
   // The key hangs from the keyhole: scaling `keyMount` shrinks it around the point where
   // it enters the lock, so it stays seated in the plug whatever its size.
   const keyMount = new THREE.Group();
@@ -196,6 +214,8 @@ export function createDoor(logo: THREE.Texture | null = null) {
       group.visible = amount > 0.001;
       for (const m of fading) m.opacity = amount;
     },
+    /** Seconds, for the light's slow haze. */
+    time,
     /** 0 = dark, 1 = full light behind the doorway. */
     setGlow(amount: number) {
       glow.value = amount;

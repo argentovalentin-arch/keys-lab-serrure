@@ -9,8 +9,8 @@ import { createKeyMesh } from './world/keyMesh';
 import { prepareKeyGlyph } from './world/glyph';
 import { DOOR_X, createDoor } from './world/door';
 import { createDoorStream } from './world/doorStream';
-import { dissolveProgress, leafInverse, leafMatrix, setBuild } from './world/dissolve';
-import { STORY_END, cameraAt, storyAt } from './core/story';
+import { DISSOLVE_END, DISSOLVE_RATE, dissolveProgress, leafInverse, leafMatrix, setBuild } from './world/dissolve';
+import { OPEN_ANGLE, STORY_END, cameraAt, storyAt } from './core/story';
 import { FrameMonitor, TIERS, forcedTier, initialTier, type Tier } from './core/quality';
 import { Loader } from './ui/loader';
 import { Stage, type Chapter } from './ui/stage';
@@ -92,9 +92,10 @@ async function start(): Promise<void> {
     logo.anisotropy = 4;
   }
   const door = createDoor(logo);
-  // The open door's breath: gold particles coming out of the light towards the visitor.
-  const STREAM_SHARE = 1 / 36; // of the tier's particles
-  const stream = createDoorStream(Math.round(TIERS[tier].particles * STREAM_SHARE), reducedMotion);
+  // The open door's breath: the light released through the doorway as gold particles. It
+  // costs little (no simulation), so lower tiers keep most of it: it is the door's life.
+  const STREAM: Record<Tier, number> = { high: 6000, medium: 4500, low: 3000 };
+  const stream = createDoorStream(STREAM[tier], reducedMotion);
   scene.add(stream.object);
   const key = createKeyMesh();
   door.keyHolder.add(key.mesh);
@@ -125,7 +126,7 @@ async function start(): Promise<void> {
     applyPixelRatio(next);
     drawSize.set(0, 0); // forces the canvas to be resized on the next frame
     applyCount(TIERS[next].particles);
-    stream.setCount(Math.round(TIERS[next].particles * STREAM_SHARE));
+    stream.setCount(STREAM[next]);
     useBloom = next !== 'low';
     console.info(`KEYS Lab: qualité ${next}`);
   };
@@ -186,7 +187,6 @@ async function start(): Promise<void> {
   const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
   const hit = new THREE.Vector3();
   const lookTarget = new THREE.Vector3();
-  const streamAim = new THREE.Vector3();
   const pointerAim = new THREE.Vector3();
 
   const scrollProgress = () => {
@@ -268,9 +268,12 @@ async function start(): Promise<void> {
     door.group.updateMatrixWorld(true);
     leafMatrix.value.copy(door.leaf.matrixWorld);
     leafInverse.value.copy(door.leaf.matrixWorld).invert();
-    // The dissolve follows the scroll more slowly than the rest, so the door breaks up
-    // over a couple of seconds rather than in a single notch of the wheel.
-    dissolve = THREE.MathUtils.damp(dissolve, state.dissolve, reducedMotion ? 20 : 0.9, dt);
+    // Once the door is fully open, it dissolves on its own clock (dissolve.ts), at a steady
+    // pace, whatever the scroll does: its particles always fly out, never hang mid-air. Going
+    // back up, it builds itself again at the same pace.
+    const dissolveTarget = state.dissolve > -0.02 ? DISSOLVE_END : -0.02;
+    const dissolveStep = (reducedMotion ? 4 : DISSOLVE_RATE) * dt;
+    dissolve += THREE.MathUtils.clamp(dissolveTarget - dissolve, -dissolveStep, dissolveStep);
     dissolveProgress.value = dissolve;
     setBuild(state.build);
     door.setReveal(state.door);
@@ -289,6 +292,8 @@ async function start(): Promise<void> {
       camera.aspect = width / height;
       // Portrait screens: step back so the key still fits across.
       distanceScale = camera.aspect < 1 ? 1 / Math.max(camera.aspect, 0.5) : 1;
+      // The door's particles, seen from further back, are drawn a little larger.
+      stream.size.value = Math.sqrt(distanceScale);
       camera.updateProjectionMatrix();
     }
     cameraAt(story, distanceScale, camera.position, lookTarget);
@@ -299,20 +304,23 @@ async function start(): Promise<void> {
     }
     camera.lookAt(lookTarget);
 
-    // The door's breath (doorStream.ts): out of the light as the door opens, towards a point
-    // in front of the visitor, or the pointer, which draws the current to it; thicker as
-    // they go in.
+    // The door's breath (doorStream.ts): the light released through the opening as the door
+    // opens, free out in the world; the pointer bends it a little; thicker as they go in.
+    // It comes out where the door no longer stands: through the gap as it swings open.
     const breath = state.glow * (0.8 + push * 1.4);
+    stream.leafCot.value = 1 / Math.tan(Math.min(Math.max(state.open, 0.01), OPEN_ANGLE));
     stream.intensity.value = breath;
     stream.object.visible = breath > 0.002;
+    door.time.value = timer.getElapsed();
     if (stream.object.visible) {
       stream.time.value = timer.getElapsed();
-      streamAim.set(0, 0, -1).applyQuaternion(camera.quaternion).multiplyScalar(2.6).add(camera.position);
       if (pointerActive) {
         raycaster.setFromCamera(ndc, camera);
-        streamAim.lerp(raycaster.ray.at(4.5, pointerAim), 0.6);
+        raycaster.ray.at(4.5, pointerAim);
+        if (stream.pull.value < 0.01) stream.attract.value.copy(pointerAim);
+        stream.attract.value.lerp(pointerAim, 1 - Math.exp(-dt * 2.5));
       }
-      stream.attract.value.lerp(streamAim, 1 - Math.exp(-dt * 2.5));
+      stream.pull.value = THREE.MathUtils.damp(stream.pull.value, pointerActive ? 1 : 0, 1.5, dt);
     }
 
     if (pointerActive && state.flow === 0) {

@@ -64,6 +64,13 @@ const RING = 2;
 const CORE = 3;
 const FRAME = 4;
 const MOTE = 5;
+const RAY = 6;
+const PROJECTOR = 7;
+const SCAN = 8;
+/** Where the chart is projected from: on the ground under it, a little towards the visitor (chart units, z in world units). */
+const SOURCE = { x: 0.5, y: -0.44, z: 1.6 };
+const RAY_POINTS = 36;
+const SCAN_POINTS = 44;
 
 export interface MonitorOptions {
   /** The Terrain's clock, for the motes drifting up through the chart. */
@@ -101,12 +108,26 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
   corner(-0.1, 1.16, 1, -1);
   corner(1.1, 1.16, -1, -1);
   for (let i = 0; i < MOTES; i++) add(((i * 0.618) % 1) * 1.2 - 0.1, (i * 0.377) % 1, -BACK * 3 * ((i * 0.29) % 1), MOTE, (i * 0.123) % 1);
+  // The projection: from a source on the ground, four fine rays to the frame's corners, as a
+  // projector's cone (projection.ts, « l'épure lumineuse »); they draw out as the chart builds.
+  for (const [cx, cy] of [[-0.1, -0.16], [1.1, -0.16], [-0.1, 1.16], [1.1, 1.16]]) {
+    for (let i = 1; i <= RAY_POINTS; i++) {
+      const t = i / RAY_POINTS;
+      add(SOURCE.x + (cx - SOURCE.x) * t, SOURCE.y + (cy - SOURCE.y) * t, SOURCE.z + (-BACK - SOURCE.z) * t, RAY, t);
+    }
+  }
+  add(SOURCE.x, SOURCE.y, SOURCE.z, PROJECTOR, 0);
+  // The cutting plane: a line across the chart that runs ahead of the curve as it draws,
+  // leaving the drawing behind it.
+  for (let i = 0; i < SCAN_POINTS; i++) add(0, -0.12 + (i / (SCAN_POINTS - 1)) * 1.24, 0.02, SCAN, i / (SCAN_POINTS - 1));
   const count = data.length / 4;
   const points = instancedArray(new Float32Array(data), 'vec4');
 
   const shown = uniform(0);
   const build = uniform(0);
   const reveal = uniform(0);
+  /** 0..1 as it goes: drawn back into its source. */
+  const retract = uniform(0);
   const placement = uniform(new THREE.Matrix4());
 
   const point = points.element(instanceIndex);
@@ -114,7 +135,12 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
   const w = fract(point.w);
   const is = (k: number) => kind.equal(k);
   const y = is(MOTE).select(fract(point.y.add(time.mul(float(0.022).add(w.mul(0.03))))), point.y);
-  const local = vec3(point.x.sub(0.5).mul(WIDTH), y.mul(HEIGHT), point.z);
+  // The cutting plane stands just ahead of the curve's head.
+  const x = is(SCAN).select(reveal.add(0.012), point.x);
+  // Once read, the projection is switched off: the whole chart draws back into its source,
+  // as an image into its projector, while it fades, leaving the way to « Performer ».
+  const source = vec3((SOURCE.x - 0.5) * WIDTH, SOURCE.y * HEIGHT, SOURCE.z);
+  const local = mix(vec3(x.sub(0.5).mul(WIDTH), y.mul(HEIGHT), point.z), source, retract.mul(retract));
 
   const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
   material.positionNode = placement.mul(vec4(local, 1)).xyz;
@@ -127,21 +153,33 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
   const since = reveal.sub(w);
   const reached = smoothstep(-0.004, 0.008, since);
   const flare = exp(since.mul(-14)).mul(reached);
+  // The rays draw out from the source as the chart builds, then stay as a faint cone.
+  const rayDrawn = smoothstep(w.sub(0.06), w, build.mul(1.3));
+  const formed = smoothstep(0.85, 1, build);
+  const drawing = smoothstep(0, 0.015, reveal).mul(float(1).sub(smoothstep(0.97, 1, reveal)));
+  const scanEdge = smoothstep(0, 0.12, w).mul(smoothstep(1, 0.88, w));
   const strength = is(PILLAR).select(built.mul(0.38),
     is(CURVE).select(drawn.mul(0.95).add(head.mul(1.5)),
       is(RING).select(built.mul(0.35).add(reached.mul(0.45)).add(flare.mul(0.6)),
         is(CORE).select(reached.mul(0.9).add(flare.mul(1.2)),
           is(FRAME).select(built.mul(0.6),
-            smoothstep(0, 0.15, y).mul(smoothstep(1, 0.75, y)).mul(0.22).mul(build))))));
+            is(RAY).select(rayDrawn.mul(mix(0.5, 0.16, formed)),
+              is(PROJECTOR).select(build.mul(mix(1.4, 0.7, formed)),
+                is(SCAN).select(drawing.mul(scanEdge).mul(0.5),
+                  smoothstep(0, 0.15, y).mul(smoothstep(1, 0.75, y)).mul(0.22).mul(build)))))))));
   const shape = particleShape();
-  // Champagne light for what is drawn; the pillars and frame in off-white, quieter.
-  const lit = is(CURVE).or(is(RING)).or(is(CORE)).or(is(MOTE)).select(float(1), float(0));
+  // Champagne light for what is drawn and for the projection; the pillars and frame in
+  // off-white, quieter.
+  const lit = is(CURVE).or(is(RING)).or(is(CORE)).or(is(MOTE)).or(is(RAY)).or(is(PROJECTOR)).or(is(SCAN)).select(float(1), float(0));
   material.colorNode = mix(color(LAB.dust).mul(0.75), color(BRAND.champagne).mul(1.5), lit);
   material.opacityNode = shape.alpha.mul(strength).mul(shown);
   material.scaleNode = is(CURVE).select(float(0.12).add(head.mul(0.2)),
     is(CORE).select(float(0.16).add(flare.mul(0.18)),
       is(RING).select(float(0.075),
-        is(MOTE).select(float(0.05).add(hash(instanceIndex).mul(0.04)), float(0.07)))));
+        is(MOTE).select(float(0.05).add(hash(instanceIndex).mul(0.04)),
+          is(RAY).select(float(0.055),
+            is(PROJECTOR).select(float(0.3),
+              is(SCAN).select(float(0.07), float(0.07))))))));
   const sprite = new THREE.Sprite(material);
   sprite.count = count;
   sprite.frustumCulled = false;
@@ -196,10 +234,14 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
     distanceAt: (x: number) => CHART.draw[0] + x * (CHART.draw[1] - CHART.draw[0]),
     /** 0..1: how much it shows now. */
     get shown() { return shown.value; },
+    /** 0..1: how much its labels show (they go first, as it starts drawing back into its source). */
+    get labelsShown() { return shown.value * (1 - smooth(retract.value, 0, 0.25)); },
     /** From the guide's distance: it builds, draws its curve, stays to be read, and goes. */
     update(distance: number, narrow: boolean) {
       if (narrow !== placedNarrow) place(narrow);
-      shown.value = smooth(distance, CHART.build[0] - 1, CHART.build[0] + 0.5) * (1 - smooth(distance, CHART.gone[0], CHART.gone[1]));
+      // It draws back into its source over its going, and is out a little before the end of it.
+      retract.value = smooth(distance, CHART.gone[0] - 0.6, CHART.gone[1]);
+      shown.value = smooth(distance, CHART.build[0] - 1, CHART.build[0] + 0.5) * (1 - smooth(distance, CHART.gone[0] + 0.4, CHART.gone[1]));
       build.value = smooth(distance, CHART.build[0], CHART.build[1]);
       reveal.value = THREE.MathUtils.clamp((distance - CHART.draw[0]) / (CHART.draw[1] - CHART.draw[0]), 0, 1);
       sprite.visible = pool.visible = shown.value > 0.001;

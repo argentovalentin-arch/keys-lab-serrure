@@ -50,7 +50,7 @@ export interface StoryState {
 // The tip ends inside the door (front face at DOOR_X, 0.3 thick) without coming out at the back.
 const INSERT_DEPTH = 0.5;
 // The door swings away from the viewer, almost fully open.
-const OPEN_ANGLE = 1.7;
+export const OPEN_ANGLE = 1.7;
 // Once in the lock, the key settles to half its size before it turns. Full size, it sticks
 // out of the lock by almost five units: turning, its bits would cut through the lock plate,
 // and with the door opening, its bow would sweep through the wall beside the doorway.

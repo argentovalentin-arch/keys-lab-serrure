@@ -28,9 +28,9 @@ interface Zone {
 
 export const ZONES: Zone[] = [
   { why: 'Structurer: the beacon charges, the wave runs out, the title reads', from: STRUCTURE_AT - 14, to: STRUCTURE_AT + 7, ease: 6, pace: 0.42 },
-  { why: 'Comprendre, then Clarifier les fondations: two notes, their badges, the walls', from: STRUCTURE_AT + 8, to: 108, ease: 4, pace: 0.44 },
+  { why: 'Comprendre, then Clarifier les fondations: two notes, their badges one at a time from just past the beacon, the paving', from: STRUCTURE_AT + 1, to: 118, ease: 4, pace: 0.26 },
   { why: 'Activer: the beacon charges, the title reads', from: ACTIVATE_AT - 13, to: ACTIVATE_AT + 7, ease: 6, pace: 0.42 },
-  { why: 'The levers: the note, then the left ones, then the right ones', from: ACTIVATE_AT + 8, to: 168, ease: 4, pace: 0.32 },
+  { why: 'The levers: the note, then the left ones, then the right ones', from: ACTIVATE_AT + 8, to: 169, ease: 4, pace: 0.32 },
   { why: 'Mesurer pour décider: the note, then the chart drawing itself', from: 170, to: 188, ease: 4, pace: 0.3 },
   { why: 'Performer: the ring, the title, the arrival', from: PERFORM_AT - 6, to: END_AT, ease: 4, pace: 0.6 },
 ];
@@ -51,20 +51,26 @@ export function paceAt(distance: number): number {
 }
 
 /**
- * The levers' discovery (terrain.ts): a row of levers on both sides of the lane, the right
- * ones chosen on the left first, then on the right. While the left ones are thrown, the
- * eyes go to each of them in turn, as one turns one's head to look; they come back to the
- * path, then go to the ones on the right. The eyes go to where each lever really stands
- * (the route bends there: a lever on its right can be ahead on the left of the view).
+ * The levers' discovery (terrain.ts): a few levers on the left of the lane, then a few on the
+ * right, well apart; only three are thrown, the three actions the summit links to a result
+ * (Contenu, Campagnes Ads, CRM: see the summit's badges in terrain.ts), so the levers the
+ * visitor sees thrown are the keys they are given at the top. The eyes go to the left ones
+ * first, to each chosen lever as it is thrown, come back to the path, then go to the right.
  */
 export const LEVERS = {
-  /** First lever and spacing (guide distances), and which ones are chosen (left: even). */
-  from: 142,
-  spacing: 2,
-  chosen: [false, false, true, false, true, false, true, false, false, true, false, true, false, false],
+  /** Each lever: where it stands along the path, on which side, and whether it is thrown. */
+  row: [
+    { at: 141, side: -1, chosen: false },
+    { at: 146, side: -1, chosen: true }, // Contenu
+    { at: 150.5, side: -1, chosen: false },
+    { at: 155, side: 1, chosen: false },
+    { at: 159, side: 1, chosen: true }, // Campagnes Ads
+    { at: 163.5, side: 1, chosen: false },
+    { at: 167, side: 1, chosen: true }, // CRM & fidélisation
+  ],
   /** When the eyes are on the left ones, then on the right ones: [turning, turned, back, ahead]. */
-  lookLeft: [139.5, 143.5, 153.5, 157] as const,
-  lookRight: [157, 160, 164.5, 168.5] as const,
+  lookLeft: [139, 142, 148.5, 151.5] as const,
+  lookRight: [151.5, 154.5, 165.5, 169] as const,
   /** How far the gaze goes from the path ahead to the lever (share of the way). A glance, not a swing. */
   look: 0.5,
 } as const;

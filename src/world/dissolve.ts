@@ -23,8 +23,16 @@ export const leafInverse = uniform(new THREE.Matrix4());
 
 /** Width of the glowing band along the dissolving front, in field units. */
 export const DISSOLVE_EDGE = 0.07;
-/** How long a released particle lives, in field units of progress. */
-export const PARTICLE_LIFE = 0.32;
+/** How long a released particle lives, in field units of progress: long enough to fly out of the doorway. */
+export const PARTICLE_LIFE = 0.75;
+/**
+ * Progress per second. Once the door is fully open the dissolve plays on its own clock
+ * (main.ts), at this pace, rather than following the scroll: a released particle always
+ * flies, it never hangs in the air because the visitor stopped scrolling.
+ */
+export const DISSOLVE_RATE = 0.42;
+/** Progress once every particle has faded. */
+export const DISSOLVE_END = 1 + PARTICLE_LIFE + 0.04;
 
 /** 0 = no door yet, 1 = the whole door drawn. The front runs past both ends of the field. */
 export function setBuild(amount: number): void {

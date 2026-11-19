@@ -3,6 +3,7 @@ import type * as THREE from 'three/webgpu';
 import type { NoteView, TagView, Terrain } from '../terrain/terrain';
 import type { Landmark } from '../terrain/path';
 import { ICONS } from '../terrain/icons';
+import { HOLO, drawHologram, type Illustration } from './holograms';
 
 type Mode = 'story' | 'entering' | 'terrain' | 'leaving';
 /** A box on screen, in CSS pixels. */
@@ -47,7 +48,10 @@ export class Epilogue {
   private readonly wordName = document.querySelector<HTMLElement>('#terrain-word-name')!;
   private readonly note = document.querySelector<HTMLElement>('#terrain-note')!;
   private readonly tagLayer = document.querySelector<HTMLElement>('#terrain-tags')!;
-  private readonly tagElements = new Map<string, { root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number; clear: number; quiet: boolean }>();
+  private readonly tagElements = new Map<string, {
+    root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number; clear: number; quiet: boolean; confirmed: boolean;
+    holo: { wrap: HTMLElement; ctx: CanvasRenderingContext2D; kind: Illustration; ratio: number; scale: number } | null;
+  }>();
   private noteText: string | null = null;
   // Sizes read from the page once, not every frame: reading layout right after moving
   // elements forces the browser to lay the page out again, several times a frame.
@@ -277,10 +281,11 @@ export class Epilogue {
         const label = document.createElement('span');
         label.className = 'terrain-tag__label';
         if (view.kind === 'badge') {
-          // Our own static SVG (icons.ts), never content from elsewhere.
+          // Our own static SVG (icons.ts), never content from elsewhere. The scan line that
+          // reveals the pictograms as the projection arrives (style.css).
           const badge = document.createElement('span');
           badge.className = 'terrain-tag__badge';
-          badge.innerHTML = view.icons.map((name) => `<span class="terrain-tag__icon">${ICONS[name]}</span>`).join('');
+          badge.innerHTML = `<span class="terrain-tag__icons">${view.icons.map((name) => `<span class="terrain-tag__icon">${ICONS[name]}</span>`).join('')}</span><span class="terrain-tag__scan" aria-hidden="true"></span>`;
           label.append(badge);
         } else if (view.kind === 'step' && view.numeral) {
           // A step of the method: its numeral, set as on the brand's site.
@@ -289,19 +294,66 @@ export class Epilogue {
           numeral.textContent = view.numeral;
           label.append(numeral);
         }
+        // Its words, one span each, so they settle one after the other (style.css).
         const caption = document.createElement('span');
         caption.className = 'terrain-tag__caption';
-        caption.textContent = view.caption;
+        const words = document.createElement('span');
+        words.className = 'terrain-tag__words';
+        view.caption.split(' ').forEach((text, i) => {
+          if (i > 0) words.append(' ');
+          const word = document.createElement('span');
+          word.className = 'terrain-tag__word';
+          word.style.setProperty('--i', String(i));
+          word.textContent = text;
+          words.append(word);
+        });
+        caption.append(words);
         label.append(caption);
         root.append(thread, label);
         this.tagLayer.append(root);
-        element = { root, thread, label, width: -1, height: -1, clear: 1, quiet: false };
+        element = { root, thread, label, width: -1, height: -1, clear: 1, quiet: false, confirmed: false, holo: null };
         this.tagElements.set(view.id, element);
       }
       if (element.quiet !== view.quiet) {
         element.quiet = view.quiet;
         element.root.classList.toggle('is-quiet', view.quiet);
         element.width = -1;
+      }
+      if (element.confirmed !== view.confirmed) {
+        element.confirmed = view.confirmed;
+        element.root.classList.toggle('is-confirmed', view.confirmed);
+      }
+      // Its hologram, over the badge, while it is the one in focus (ui/holograms.ts): the
+      // badge, its words and its drawing, one composition.
+      if (view.holo && !element.holo) {
+        const scale = window.innerWidth < 700 ? 0.72 : 1;
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        const wrap = document.createElement('span');
+        wrap.className = 'terrain-tag__holo';
+        wrap.setAttribute('aria-hidden', 'true');
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(HOLO.width * scale * ratio);
+        canvas.height = Math.round(HOLO.height * scale * ratio);
+        canvas.style.width = `${HOLO.width * scale}px`;
+        canvas.style.height = `${HOLO.height * scale}px`;
+        wrap.append(canvas);
+        element.label.prepend(wrap);
+        const ctx = canvas.getContext('2d');
+        if (ctx) element.holo = { wrap, ctx, kind: view.holo.kind, ratio, scale };
+        element.width = -1;
+      } else if (!view.holo && element.holo) {
+        element.holo.wrap.remove();
+        element.holo = null;
+        element.width = -1;
+      }
+      if (view.holo && element.holo) {
+        const { wrap, ctx, kind, ratio, scale } = element.holo;
+        drawHologram(ctx, kind, view.holo.t, performance.now() / 1000, ratio, scale);
+        // Folding away: down into the badge it rose from.
+        const fold = view.holo.fold;
+        const eased = fold * fold * (3 - 2 * fold);
+        wrap.style.transform = fold > 0 ? `scaleY(${(1 - eased).toFixed(3)})` : '';
+        wrap.style.opacity = fold > 0 ? (1 - eased).toFixed(3) : '';
       }
       if (element.width < 0) {
         element.width = element.label.offsetWidth;
@@ -338,11 +390,17 @@ export class Epilogue {
       element.root.style.transform = `translate(${lx.toFixed(1)}px, ${ly.toFixed(1)}px)`;
       // Secondary to the note: never quite as bright.
       element.root.style.opacity = (view.opacity * 0.92 * element.clear).toFixed(3);
-      // The thread runs from the label down to its point.
+      // The thread runs from the label down to its point. A badge's own projection (a line of
+      // light in the scene, projection.ts) already joins them where the label stands in its
+      // place: the thread only shows when the label had to move aside, to keep them joined.
       const length = Math.hypot(gx - lx, gy - ly);
       const angle = Math.atan2(gy - ly, gx - lx);
       element.thread.style.width = `${length.toFixed(1)}px`;
       element.thread.style.transform = `rotate(${angle.toFixed(4)}rad)`;
+      if (view.kind === 'badge') {
+        const moved = Math.hypot(lx - ((view.lx + 1) / 2) * w, ly - ((1 - view.ly) / 2) * h);
+        element.thread.style.opacity = Math.min(1, Math.max(0, (moved - 4) / 16)).toFixed(2);
+      }
     }
     for (const [id, element] of this.tagElements) {
       if (!seen.has(id)) {

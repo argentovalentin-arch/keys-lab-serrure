@@ -1,19 +1,18 @@
 import * as THREE from 'three/webgpu';
 import {
-  Fn, clamp, color, cos, float, hash, instanceIndex, instancedArray, length, max, min, mix, mx_noise_vec3, pow, sin,
+  Fn, clamp, color, cos, float, hash, instanceIndex, instancedArray, length, min, mix, mx_noise_vec3, pow, sin,
   smoothstep, sqrt, uint, uniform, uv, vec3, vec4,
 } from 'three/tsl';
 import { chaosLayout, keyLayout } from './shapes';
-import { DOOR_X, LEAF } from './door';
+import { LEAF } from './door';
+import { againstLight, outward, throughDoorway } from './portal';
 import { PARTICLE_LIFE, dissolveField, dissolveProgress, leafMatrix } from './dissolve';
 import { SPRITE_GROWTH, coreColor, particleShape, twinkle } from './sprite';
 import { BRAND, LAB } from '../core/brand';
 
 const CHAOS_RADIUS = 4.5;
-// Door particles stay in the door's own zone: beyond the wall's back face (so never in
-// front of the wall or its casing), and within the doorway's height.
-const DOOR_ZONE_MIN_X = DOOR_X + LEAF.thickness + 0.05;
-const DOOR_ZONE_HALF_HEIGHT = LEAF.height / 2 - 0.1;
+// Share of the door's particles that fly all the way out through the doorway as light.
+const ESCAPE_SHARE = 0.06;
 // The key emerging from the noise (morph 0 to 2): each particle sets off for its place
 // in the key at its own moment, in the order of the key layout (outline first, see
 // shapes.ts), and takes this share of the transition to get there. None leaves before
@@ -80,20 +79,22 @@ export function createParticles(count: number) {
   );
   const age = clamp(dissolveProgress.sub(dissolveField(doorPoint, LEAF.width)).div(PARTICLE_LIFE), 0, 1);
   const eased = float(1).sub(float(1).sub(age).pow(2));
-  // Released particles lift off the door's front face, rising gently and swirling
-  // along a slow noise field: a controlled drift, not a fall.
+  // Released, a flake lifts off the door's front face, then leaves through the doorway
+  // (portal.ts): drawn in to the opening on its way, then free beyond it, fanning out and
+  // rising, along a slow swirl. Nothing bounds it once it is out: the door's matter goes
+  // out into the world as light (see the colour below).
+  const flakeSeed = (k: number) => hash(instanceIndex.add(uint(count * k)));
   const faceNormal = leafMatrix.mul(vec4(-1, 0, 0, 0)).xyz;
-  const swirl = mx_noise_vec3(doorPoint.mul(0.9).add(vec3(0, time.mul(0.12), 0))).mul(0.45);
-  const lifted = leafMatrix.mul(vec4(doorPoint, 1)).xyz
-    .add(faceNormal.mul(eased.mul(0.8)))
-    .add(swirl.mul(eased))
-    .add(vec3(0, eased.mul(0.35), 0));
-  // Kept inside the door's zone: behind the wall plane, within the doorway's height.
-  const flowHome = vec3(
-    max(lifted.x, DOOR_ZONE_MIN_X),
-    clamp(lifted.y, -DOOR_ZONE_HALF_HEIGHT, DOOR_ZONE_HALF_HEIGHT),
-    lifted.z,
-  );
+  const leftFrom = leafMatrix.mul(vec4(doorPoint, 1)).xyz.add(faceNormal.mul(eased.mul(0.55)));
+  // Out towards the visitor: quick at first, then slowing. Only a share of the door goes
+  // all the way out, as light; the rest drifts a little and fades in the doorway's light.
+  const escapes = flakeSeed(11).lessThan(ESCAPE_SHARE);
+  const reach = escapes.select(mix(3.4, 7.5, flakeSeed(8)), mix(0.3, 1.5, flakeSeed(8)));
+  const travelledOut = float(1).sub(float(1).sub(age).pow(2.6)).mul(reach);
+  const flight = throughDoorway(leftFrom, travelledOut, outward(flakeSeed(9), mix(0.2, 3.6, flakeSeed(10).pow(0.9)), leftFrom));
+  const flakeOut = smoothstep(0, 1.2, flight.beyond);
+  const swirl = mx_noise_vec3(doorPoint.mul(0.9).add(vec3(0, time.mul(0.12), 0))).mul(mix(0.12, 0.6, flakeOut)).mul(eased);
+  const flowHome = flight.position.add(swirl).add(vec3(0, eased.mul(eased).mul(flakeOut).mul(1.1), 0));
 
   const update = Fn(() => {
     const position = positions.element(instanceIndex);
@@ -133,10 +134,10 @@ export function createParticles(count: number) {
     const away = position.sub(pointer);
     const distance = length(away);
     const falloff = smoothstep(1.6, 0, distance).mul(pointerStrength);
-    const outward = away.div(distance.add(0.0001));
-    const around = vec3(outward.y, outward.x.negate(), 0);
+    const awayDir = away.div(distance.add(0.0001));
+    const around = vec3(awayDir.y, awayDir.x.negate(), 0);
     const swirl = float(1).sub(gather.mul(0.7));
-    force.addAssign(outward.mul(falloff.mul(14)).add(around.mul(falloff.mul(swirl).mul(22))));
+    force.addAssign(awayDir.mul(falloff.mul(14)).add(around.mul(falloff.mul(swirl).mul(22))));
 
     velocity.assign(velocity.add(force.mul(delta)).mul(float(1).sub(delta.mul(5)).max(0)));
     position.addAssign(velocity.mul(delta));
@@ -155,16 +156,21 @@ export function createParticles(count: number) {
   const drawn = positions.toAttribute();
   material.positionNode = drawn;
 
-  // Calm particles stay cream; the ones the pointer scatters warm up. Off the door,
-  // they leave warm, like the glowing front they break from, and settle to the door's
-  // own navy: seen against the light of the doorway, they read as dark flakes of door.
-  // (Additive cream would vanish into that light; see setDoorMode.)
+  // Calm particles stay cream; the ones the pointer scatters warm up. Off the door, in
+  // its light, they leave burning, like the front they break from, and settle to the door's
+  // own navy: seen against the light of the doorway, they read as dark flakes of door
+  // (additive cream would vanish into that light; see setDoorMode). Through the opening
+  // and out in the dark, the door's matter has become light: champagne points.
   const speed = length(velocities.toAttribute());
   const shapeColor = mix(color(LAB.dust), color(LAB.warmth), smoothstep(0.4, 3, speed));
-  const doorColor = mix(color('#c98a45'), color(BRAND.navy), smoothstep(0, 0.5, age));
+  const shape = particleShape();
+  // Seen against the doorway's light, a flake is a dark piece of door; against the dark,
+  // a point of light (portal.ts): it changes as it leaves the light behind it.
+  const inLight = againstLight(drawn);
+  const matter = mix(color(LAB.light), color(BRAND.navy), smoothstep(0, 0.35, age));
+  const doorColor = mix(coreColor(vec3(...new THREE.Color(LAB.light).toArray()), shape.core), matter, inLight);
   // Points of light (sprite.ts): a whiter core in a faint halo.
   // Far in the cloud they cool towards the night's blue, near they stay cream: depth.
-  const shape = particleShape();
   const nearness = smoothstep(-CHAOS_RADIUS, CHAOS_RADIUS * 0.6, positions.toAttribute().z);
   const depthTint = mix(vec3(0.72, 0.8, 0.95), vec3(1, 1, 1), nearness);
   material.colorNode = mix(coreColor(shapeColor.mul(depthTint), shape.core), doorColor, flow);
@@ -178,22 +184,25 @@ export function createParticles(count: number) {
   const shimmer = mix(twinkle(time, grainSeed), 1, smoothstep(1.2, 2, morph).max(flow));
   const depth = mix(mix(0.35, 1, smoothstep(-CHAOS_RADIUS, CHAOS_RADIUS, drawn.z)), 1, flow);
   const density = mix(mix(1, 0.35, smoothstep(1, 2, morph)), 1, flow);
-  // Off the door, a particle shows only once released, then fades out as it drifts.
-  const lane = mix(1, smoothstep(0, 0.12, age).mul(float(1).sub(smoothstep(0.45, 1, age))), flow);
+  // Off the door, a particle shows only once released, then fades out as it drifts away.
+  const lane = mix(1, smoothstep(0, 0.1, age).mul(float(1).sub(smoothstep(0.6, 1, age))), flow);
   // Particles fade out just before the cut, so they never overlap the solid part.
   const beforeCut = smoothstep(cut, cut.sub(0.06), drawn.x);
   // Door flakes are drawn with normal blending against the light: a little more opaque.
   const doorOpacity = mix(1, 1.8, flow);
+  // A flake in the light is a soft disc of matter; out in the dark, a point of light.
+  const doorAlpha = mix(shape.alpha.mul(0.34), flake.mul(flake).mul(0.5), inLight);
   material.opacityNode = min(
-    mix(shape.alpha.mul(0.62), flake.mul(flake).mul(0.5), flow).mul(depth).mul(density).mul(brightness).mul(lane).mul(visibility).mul(beforeCut)
+    mix(shape.alpha.mul(0.62), doorAlpha, flow).mul(depth).mul(density).mul(brightness).mul(lane).mul(visibility).mul(beforeCut)
       .mul(doorOpacity).mul(shimmer),
     1,
   );
 
   // Most particles are fine dust; a few are larger, which gives the cloud some grain.
-  // Off the door, they are flakes, a little larger, to read against the light.
+  // Off the door, they are flakes, a little larger, to read against the light; out of it,
+  // points of light, a little finer.
   const grain = grainSeed;
-  material.scaleNode = float(0.02).add(pow(grain, 6).mul(0.06)).mul(mix(SPRITE_GROWTH, 2.2, flow));
+  material.scaleNode = float(0.02).add(pow(grain, 6).mul(mix(0.06, 0.035, flow))).mul(mix(SPRITE_GROWTH, mix(1.6, 2.2, inLight), flow));
 
   const sprite = new THREE.Sprite(material);
   sprite.count = count;

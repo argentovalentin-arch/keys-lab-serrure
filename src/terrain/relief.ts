@@ -2,18 +2,17 @@ import * as THREE from 'three/webgpu';
 import { SPRITE_GROWTH, coreColor, particleShape } from '../world/sprite';
 import { LAB } from '../core/brand';
 import {
-  attribute, clamp, color, cos, float, hash, instanceIndex, length, mix, positionLocal, sin, smoothstep, uint, uniform, uv, vec3,
+  attribute, cameraPosition, clamp, color, cos, exp, float, hash, instanceIndex, length, mix, positionLocal, sin, smoothstep, uint, uniform, uv, vec2, vec3,
 } from 'three/tsl';
 import {
-  CONTOUR_STEP, END_AT, MOUNTAIN_RADIUS, PATH_HALF, SUMMIT_HEIGHT, SUMMIT_Z, centerX, centerXNode, groundAt,
-  groundNode, lateralAt, type TrajectoryPoint,
+  ACTIVATE_AT, CONTOUR_STEP, END_AT, MOUNTAIN_RADIUS, PATH_HALF, PERFORM_AT, STRUCTURE_AT, SUMMIT_HEIGHT, SUMMIT_Z, centerX,
+  centerXNode, groundAt, groundNode, lateralAt, type TrajectoryPoint,
 } from './path';
 
 const CREAM = LAB.dust;
 const WARM = LAB.light;
 const LOW = '#8fa6c8'; // far below, in the haze
 const TOP_RADIUS = 9; // as in path.ts: the flat top
-const STEEPNESS = 1.6;
 const JOURNEY_POINTS = 360;
 const PLAIN_RINGS = 18;
 const PLAIN_RING_STEP = 24;
@@ -35,25 +34,47 @@ export function createRelief(scene: THREE.Scene, count: number) {
   // start lies far down and the path visibly descends. The top itself does not move.
   const depth = uniform(1);
   const deepenNode = (y: THREE.Node<'float'>) => float(SUMMIT_HEIGHT).sub(float(SUMMIT_HEIGHT).sub(y).mul(depth));
-  const laneCount = Math.floor(count * 0.25);
+  const laneCount = Math.floor(count * 0.18);
   const isLane = instanceIndex.lessThan(uint(laneCount));
   const seedA = hash(instanceIndex);
   const seedB = hash(instanceIndex.add(uint(count)));
   const seedC = hash(instanceIndex.add(uint(count * 2)));
 
-  // Mountain particles: a point picked evenly over the mountain's footprint, then, for
-  // most of them, pulled onto the nearest contour line (the ring at that height).
+  // Mountain particles: a point over the mountain's footprint (more of them near the top,
+  // where the eye is), then, for most of them, moved onto the nearest contour line: one step
+  // of Newton's method along the ground's slope, which works for any relief. The lines then
+  // follow every spur and valley, tightening where the ground is steep, as on a relief map.
   const footprint = TOP_RADIUS + MOUNTAIN_RADIUS;
   const angle = seedA.mul(Math.PI * 2);
-  const radius = seedB.sqrt().mul(footprint);
-  const looseHeight = groundNode(cos(angle).mul(radius), sin(angle).mul(radius).add(SUMMIT_Z));
-  const level = looseHeight.div(CONTOUR_STEP).add(0.5).floor().mul(CONTOUR_STEP).min(SUMMIT_HEIGHT);
-  const levelRadius = float(1).sub(level.div(SUMMIT_HEIGHT).pow(1 / STEEPNESS)).mul(MOUNTAIN_RADIUS).add(TOP_RADIUS);
-  const onContour = seedC.lessThan(0.78);
-  const r = onContour.select(levelRadius, radius);
-  const mountainX = cos(angle).mul(r);
-  const mountainZ = sin(angle).mul(r).add(SUMMIT_Z);
-  const mountainY = onContour.select(level, looseHeight);
+  const radius = seedB.pow(0.7).mul(footprint);
+  const looseX = cos(angle).mul(radius);
+  const looseZ = sin(angle).mul(radius).add(SUMMIT_Z);
+  const STEP = 0.6;
+  const h0 = groundNode(looseX, looseZ);
+  const gradX = groundNode(looseX.add(STEP), looseZ).sub(h0).div(STEP);
+  const gradZ = groundNode(looseX, looseZ.add(STEP)).sub(h0).div(STEP);
+  const slope2 = gradX.mul(gradX).add(gradZ.mul(gradZ)).max(0.0004);
+  const level = h0.div(CONTOUR_STEP).add(0.5).floor().mul(CONTOUR_STEP).min(SUMMIT_HEIGHT);
+  const shift = h0.sub(level).div(slope2).clamp(-3, 3);
+  const onContour = seedC.lessThan(0.5);
+  const mountainX = onContour.select(looseX.sub(gradX.mul(shift)), looseX);
+  const mountainZ = onContour.select(looseZ.sub(gradZ.mul(shift)), looseZ);
+  const mountainY = groundNode(mountainX, mountainZ);
+  // How the ground there faces the light (low, from one side and from the valley): the spurs'
+  // flanks turned to it read bright, the others in shade, so the volumes show. Its crests
+  // (where the ground falls away on both sides) are lit along their line.
+  const normal = vec3(gradX.negate(), float(1).div(depth), gradZ.negate()).normalize();
+  const facing = normal.dot(vec3(0.78, 0.5, 0.38).normalize()).max(0);
+  const around = groundNode(mountainX.add(6), mountainZ).add(groundNode(mountainX.sub(6), mountainZ))
+    .add(groundNode(mountainX, mountainZ.add(6))).add(groundNode(mountainX, mountainZ.sub(6)));
+  const crest = smoothstep(0.5, 3.5, mountainY.mul(4).sub(around));
+  // The landmarks stand out of the relief: a ring of light round each, on the ground.
+  const ringAt = (x: number, z: number) => {
+    const d = vec2(mountainX.sub(x), mountainZ.sub(z)).length();
+    return exp(d.sub(3.6).mul(2.4).pow(2).negate());
+  };
+  const landmarks = ringAt(centerX(STRUCTURE_AT), -STRUCTURE_AT).add(ringAt(centerX(ACTIVATE_AT), -ACTIVATE_AT))
+    .add(ringAt(centerX(PERFORM_AT), -PERFORM_AT));
 
   // Lane particles: along the route's centre line, from the start to the top.
   const p = seedA.mul(END_AT);
@@ -76,20 +97,42 @@ export function createRelief(scene: THREE.Scene, count: number) {
   const drop = float(SUMMIT_HEIGHT).sub(isLane.select(laneY, mountainY)).div(SUMMIT_HEIGHT).clamp(0, 1);
   const haze = drop.mul(clamp(depth.sub(1).mul(1.5), 0, 1));
   const shape = particleShape();
-  material.colorNode = coreColor(mix(mix(color(CREAM), color(WARM), isLane.select(float(0.6), float(0))), color(LOW), haze.mul(0.55)), shape.core);
+  const lit = isLane.select(float(0.6), crest.mul(0.7).add(landmarks).min(1));
+  material.colorNode = coreColor(mix(mix(color(CREAM), color(WARM), lit), color(LOW), haze.mul(0.45)), shape.core).mul(1.25);
   const disc = clamp(float(1).sub(length(uv().sub(0.5)).mul(2)), 0, 1);
   // The lane fades over its last stretch, right under the camera on the summit, where
   // close-up particles would blot out the view rather than draw the route.
   const laneFade = float(1).sub(smoothstep(END_AT - 45, END_AT - 12, p)).max(0.15);
-  const strength = isLane.select(laneFade.mul(0.85), onContour.select(float(1), float(0.25)));
+  const shading = facing.mul(1.5).add(0.3).add(crest.mul(1.3)).add(landmarks.mul(1.2));
+  const strength = isLane.select(laneFade.mul(0.85), onContour.select(float(1.25), float(0.8)).mul(shading));
   material.opacityNode = shape.alpha.mul(strength).mul(float(1).sub(haze.mul(isLane.select(float(0.2), float(0.35))))).mul(shown);
   // Seen from far up the mountain, the particles need to be larger than underfoot; the
   // contour lines most of all, as they draw the mountain's shape from a distance.
-  material.scaleNode = isLane.select(float(0.16), onContour.select(float(0.24), float(0.13))).add(seedC.pow(6).mul(0.12)).mul(SPRITE_GROWTH);
+  // Far down the mountain, a point keeps a readable size on screen: the whole relief shows,
+  // not only what is near.
+  const fromEye = vec3(isLane.select(laneX, mountainX), deepenNode(isLane.select(laneY, mountainY)), isLane.select(laneZ, mountainZ))
+    .sub(cameraPosition).length();
+  material.scaleNode = isLane.select(float(0.16), onContour.select(float(0.26), float(0.2))).add(seedC.pow(6).mul(0.12)).mul(SPRITE_GROWTH)
+    .mul(fromEye.div(55).max(1).pow(0.85));
   const points = new THREE.Sprite(material);
   points.count = count;
   points.frustumCulled = false;
   scene.add(points);
+
+  // The ground itself, unseen: a surface just under the particles that only writes depth.
+  // Seen from the top, a spur or a hill then hides what lies behind it, the route's light
+  // included, which reappears further down: the mountain has a body, not only lines.
+  const SURFACE = 200;
+  const surfaceGeometry = new THREE.PlaneGeometry(footprint * 2, footprint * 2, SURFACE, SURFACE).rotateX(-Math.PI / 2);
+  const surfaceMaterial = new THREE.MeshBasicNodeMaterial({ colorWrite: false, side: THREE.DoubleSide });
+  const groundX = positionLocal.x;
+  const groundZ = positionLocal.z.add(SUMMIT_Z);
+  surfaceMaterial.positionNode = vec3(groundX, deepenNode(groundNode(groundX, groundZ)).sub(depth.mul(0.55)), groundZ);
+  const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
+  surface.frustumCulled = false;
+  surface.renderOrder = -2;
+  surface.visible = false;
+  scene.add(surface);
 
   // The valley floor around the mountain, out towards the horizon, at the start's level:
   // rings of faint particles, continuing the contour lines. It only shows as the mountain
@@ -178,6 +221,7 @@ export function createRelief(scene: THREE.Scene, count: number) {
       shown.value = amount;
       points.visible = amount > 0.001;
       plain.visible = amount > 0.001;
+      surface.visible = amount > 0.5;
       start.visible = amount > 0.001;
       line.visible = amount > 0.001 && line.userData.ready === true;
     },
@@ -223,6 +267,8 @@ export function createRelief(scene: THREE.Scene, count: number) {
       // particles included; disposing it would break them.
       material.dispose();
       plainMaterial.dispose();
+      surfaceGeometry.dispose();
+      surfaceMaterial.dispose();
       lineGeometry.dispose();
       lineMaterial.dispose();
       start.geometry.dispose();

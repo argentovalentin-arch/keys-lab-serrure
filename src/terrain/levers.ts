@@ -45,12 +45,9 @@ const points = (spacing: number, size = 0.24) =>
 const pointsAlongY = (spacing: number) => smoothstep(0.3, 0.1, positionLocal.y.div(spacing).fract().sub(0.5).abs());
 
 export interface LeverOptions {
-  /** Distance along the path of the first lever, and between two. */
-  from: number;
-  spacing: number;
-  /** One entry per lever, in order: whether it is one of the levers to throw. */
-  chosen: boolean[];
-  /** How far from the route's centre line they stand, alternately left and right. */
+  /** One entry per lever, in order: where it stands along the path, its side (-1 left, 1 right), whether it is thrown. */
+  row: readonly { at: number; side: number; chosen: boolean }[];
+  /** How far from the route's centre line they stand (the ones left alone a little further out). */
   offset: number;
 }
 
@@ -62,14 +59,13 @@ export interface LeverOptions {
  * single pulse runs out on the ground (terrain.ts names it at the same moment). The others stay dim and leaning back: not
  * every lever is thrown.
  */
-export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset }: LeverOptions) {
+export function createLevers(scene: THREE.Scene, { row, offset }: LeverOptions) {
   const plinthGeometry = new THREE.CylinderGeometry(0.22, 0.3, 0.14, 6, 2).translate(0, 0.07, 0);
   const collarGeometry = new THREE.RingGeometry(0.14, 0.19, 6).rotateX(-Math.PI / 2).translate(0, 0.142, 0);
   const armGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.86, 6).translate(0, 0.43, 0);
   const pulseGeometry = new THREE.PlaneGeometry(2.4, 2.4).rotateX(-Math.PI / 2).translate(0, 0.03, 0);
 
-  const levers = chosen.map((isChosen, i) => {
-    const at = from + i * spacing;
+  const levers = row.map(({ at, side: leverSide, chosen: isChosen }) => {
     const seen = uniform(0);
     const thrown = uniform(0);
     const pulse = uniform(0);
@@ -135,7 +131,8 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
     );
     // Beside the lane, square to the route where it stands, on the ground there.
     const heading = headingAt(at);
-    const side = (i % 2 ? 1 : -1) * offset;
+    // The chosen ones stand forward, by the lane; the others a little back: what is chosen stands out.
+    const side = leverSide * (isChosen ? offset : offset + 0.9);
     const x = centerX(at) + side * Math.cos(heading);
     const z = -at + side * Math.sin(heading);
     const baseY = groundAt(x, z);
@@ -144,7 +141,7 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
     pivot.rotation.x = REST;
     scene.add(group);
     return {
-      at, isChosen, group, pivot, knob, baseY, seen, thrown, pulse, flare,
+      at, isChosen, side: leverSide, group, pivot, knob, baseY, seen, thrown, pulse, flare,
       materials: [plinthMaterial, armMaterial, knobMaterial, collarMaterial, pulseMaterial, columnMaterial],
     };
   });
@@ -153,7 +150,7 @@ export function createLevers(scene: THREE.Scene, { from, spacing, chosen, offset
     /** Where each chosen lever stands (its plinth on the ground), in order, for its label. */
     chosenPlaces(): { at: number; place: THREE.Vector3; side: number }[] {
       return levers.filter((l) => l.isChosen).map((l) => ({
-        at: l.at, place: l.group.position.clone(), side: levers.indexOf(l) % 2 ? 1 : -1,
+        at: l.at, place: l.group.position.clone(), side: l.side,
       }));
     },
     /** From the guide's distance: each lever comes into view, and the chosen ones are thrown in turn. */

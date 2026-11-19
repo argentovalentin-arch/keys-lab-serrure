@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { clamp, float, max, sin, smoothstep, vec2 } from 'three/tsl';
+import { atan, clamp, cos, float, max, sin, smoothstep, vec2 } from 'three/tsl';
 
 /**
  * The Terrain's route, shared by the ride (terrain.ts), the relief seen from the summit
@@ -59,15 +59,52 @@ const TOP_RADIUS = 9; // the flat top
 export const MOUNTAIN_RADIUS = 200; // from the edge of the top to the foot
 const STEEPNESS = 1.6;
 
+/**
+ * The mountain's own relief, over its smooth cone: spurs running down from the top with
+ * valleys between them, hills and hollows on the slopes, finer folds; strongest on the
+ * mid-slopes, gone on the flat top and at the foot. The route's own corridor is left as
+ * it was (the lane, its walls, levers and labels stand on the same ground as before): the
+ * relief rises beside it. Written twice, once for the CPU and once for the shaders, with the
+ * same sums of waves, so both always agree.
+ */
+const RELIEF = { spurs: 7, spur: 6, hills: 3.4, folds: 1, corridor: [5.5, 24] as const, rise: [TOP_RADIUS + 14, TOP_RADIUS + 75] as const };
+const smoothJS = THREE.MathUtils.smoothstep;
+const reliefJS = (x: number, z: number, r: number) => {
+  const envelope = smoothJS(r, RELIEF.rise[0], RELIEF.rise[1]) * (1 - smoothJS(r, MOUNTAIN_RADIUS * 0.72, MOUNTAIN_RADIUS + TOP_RADIUS));
+  const theta = Math.atan2(z - SUMMIT_Z, x);
+  const warp = 0.45 * Math.sin(r * 0.03 + theta * 2) + 0.25 * Math.sin(r * 0.071 - theta * 3);
+  const crest = 1 - Math.abs(Math.sin(theta * (RELIEF.spurs / 2) + warp));
+  const spurs = (crest ** 1.6 * 2 - 0.7) * RELIEF.spur;
+  const hills = Math.sin(x * 0.083 + Math.sin(z * 0.047) * 1.3) * Math.cos(z * 0.071 + Math.sin(x * 0.059) * 1.1) * RELIEF.hills;
+  const folds = Math.sin(x * 0.23 + z * 0.17) * Math.sin(z * 0.21 - x * 0.13) * RELIEF.folds;
+  const p = Math.min(Math.max(-z, 0), END_AT);
+  const corridor = smoothJS(Math.abs(x - centerX(p)), RELIEF.corridor[0], RELIEF.corridor[1]);
+  return (spurs + hills + folds) * envelope * corridor * (0.5 + 0.5 * Math.min(1, r / 90));
+};
+const reliefNode = (x: THREE.Node<'float'>, z: THREE.Node<'float'>, r: THREE.Node<'float'>) => {
+  const envelope = smoothstep(RELIEF.rise[0], RELIEF.rise[1], r).mul(float(1).sub(smoothstep(MOUNTAIN_RADIUS * 0.72, MOUNTAIN_RADIUS + TOP_RADIUS, r)));
+  const theta = atan(z.sub(SUMMIT_Z), x);
+  const warp = sin(r.mul(0.03).add(theta.mul(2))).mul(0.45).add(sin(r.mul(0.071).sub(theta.mul(3))).mul(0.25));
+  const crest = float(1).sub(sin(theta.mul(RELIEF.spurs / 2).add(warp)).abs());
+  const spurs = crest.pow(1.6).mul(2).sub(0.7).mul(RELIEF.spur);
+  const hills = sin(x.mul(0.083).add(sin(z.mul(0.047)).mul(1.3))).mul(cos(z.mul(0.071).add(sin(x.mul(0.059)).mul(1.1)))).mul(RELIEF.hills);
+  const folds = sin(x.mul(0.23).add(z.mul(0.17))).mul(sin(z.mul(0.21).sub(x.mul(0.13)))).mul(RELIEF.folds);
+  const p = z.negate().clamp(0, END_AT);
+  const corridor = smoothstep(RELIEF.corridor[0], RELIEF.corridor[1], x.sub(centerXNode(p)).abs());
+  return spurs.add(hills).add(folds).mul(envelope).mul(corridor).mul(float(0.5).add(r.div(90).min(1).mul(0.5)));
+};
+
 /** Ground height at a point of the world (x, z). */
 export const groundAt = (x: number, z: number) => {
-  const away = Math.max(Math.hypot(x, z - SUMMIT_Z) - TOP_RADIUS, 0) / MOUNTAIN_RADIUS;
-  return SUMMIT_HEIGHT * Math.max(1 - away, 0) ** STEEPNESS;
+  const r = Math.hypot(x, z - SUMMIT_Z);
+  const away = Math.max(r - TOP_RADIUS, 0) / MOUNTAIN_RADIUS;
+  return SUMMIT_HEIGHT * Math.max(1 - away, 0) ** STEEPNESS + reliefJS(x, z, r);
 };
 /** Same, in a shader. */
 export const groundNode = (x: THREE.Node<'float'>, z: THREE.Node<'float'>) => {
-  const away = max(vec2(x, z.sub(SUMMIT_Z)).length().sub(TOP_RADIUS), 0).div(MOUNTAIN_RADIUS);
-  return clamp(float(1).sub(away), 0, 1).pow(STEEPNESS).mul(SUMMIT_HEIGHT);
+  const r = vec2(x, z.sub(SUMMIT_Z)).length();
+  const away = max(r.sub(TOP_RADIUS), 0).div(MOUNTAIN_RADIUS);
+  return clamp(float(1).sub(away), 0, 1).pow(STEEPNESS).mul(SUMMIT_HEIGHT).add(reliefNode(x, z, r));
 };
 /** Distance from the summit's centre at which the ground stands at height h. */
 export const radiusAtHeight = (h: number) =>

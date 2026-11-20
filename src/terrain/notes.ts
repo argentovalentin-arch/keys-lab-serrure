@@ -1,3 +1,5 @@
+import { ACTIVATE_ACT, ENDING, MEASURE_ACT, STRUCTURE_ACT } from './timeline';
+
 /**
  * A few short markers for the visitor, set in the scene beside the path between the
  * landmarks: what each of the three stages means at Keys Performance. Each one is taken
@@ -8,10 +10,9 @@
  *
  * During the ride a note shows while the guide covers its stretch of path (`from`..`to`),
  * standing on one side at a point a little ahead of the end of that stretch, so it comes
- * out of the distance and is about to be passed as it fades. The stretches share out
- * the gaps between the landmarks' titles evenly, with clear room before and after each
- * title. On the summit the last one hangs over the start, far below, over a span of
- * seconds after the stop, while the visitor looks back.
+ * out of the distance and is about to be passed as it fades. The stretches come from the
+ * narration (timeline.ts): each note alone, before what it introduces. On the summit the
+ * last one stands over the top, ahead, over a span of seconds after the stop.
  */
 export interface Note {
   text: string;
@@ -28,19 +29,21 @@ interface RideNote extends Note {
   to: number;
 }
 
-// Landmarks at 60, 125, 195 (path.ts); their titles show from 7 before to 7 after
-// (pace.ts, WORD): free path 68..117 and 133..187. Each note comes right after what
-// introduces it, and the ride slows over its stretch (pace.ts), so it reads in full.
-// The ride stops at 203.
+const stretch = ([from, to]: [number, number]) => ({ from, to });
+
+// Each note has its own beat in the narration (timeline.ts): alone on screen, between the
+// title and the badges it introduces, and read before what it announces is shown in the
+// scene (the ground examined, the paving, the levers, the chart). The ride slows over its
+// stretch, so it reads in full.
 const RIDE: RideNote[] = [
   // Structurer → Activer: understand the situation, then lay clear foundations
-  // (« Clarifier les fondations », the site's Structurer), straight after.
-  { topic: 'understand', from: 68, to: 86, side: -1, text: 'Comprendre *avant* de proposer.' },
-  { topic: 'foundations', from: 88, to: 108, side: 1, text: 'Clarifier les *fondations*.' },
-  // Activer → Performer: the right levers, not all of them, read before they are shown
-  // (left, then right); then measuring to decide, read before the chart draws itself.
-  { topic: 'levers', from: 133, to: 145, side: 1, text: 'Les *bons* leviers. Pas tous.' },
-  { topic: 'measure', from: 170, to: 181, side: -1, text: 'Mesurer pour *décider*.' },
+  // (« Clarifier les fondations », the site's Structurer).
+  { topic: 'understand', ...stretch(STRUCTURE_ACT.beats.understandNote), side: -1, text: 'Comprendre *avant* de proposer.' },
+  { topic: 'foundations', ...stretch(STRUCTURE_ACT.beats.foundationsNote), side: 1, text: 'Clarifier les *fondations*.' },
+  // Activer → Performer: the right levers, not all of them, read before they rise and the
+  // energy runs through them; then measuring to decide, read before the chart draws itself.
+  { topic: 'levers', ...stretch(ACTIVATE_ACT.beats.leversNote), side: 1, text: 'Les *bons* leviers. Pas tous.' },
+  { topic: 'measure', ...stretch(MEASURE_ACT.beats.measureNote), side: -1, text: 'Mesurer pour *décider*.' },
 ];
 
 /** The stretch of path (guide distances) over which the note on a topic shows. */
@@ -52,10 +55,10 @@ export function noteStretch(topic: NoteTopic): { from: number; to: number } {
 /** How far past the end of its stretch a note stands. */
 const NOTE_LEAD = 9;
 
-/** On the summit, looking back down the climb: every result traced back to an action. */
+/** On the summit, still facing ahead: every result traced back to an action, read before its badges come. */
 const SUMMIT: Note & { afterStop: [number, number] } = {
   side: 0,
-  afterStop: [2.6, 8.8], // still facing ahead, before the half-turn (terrain.ts, ACTIONS)
+  afterStop: ENDING.note,
   text: 'Chaque résultat relié à *une action*.',
 };
 

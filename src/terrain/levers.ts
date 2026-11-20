@@ -49,6 +49,11 @@ export interface LeverOptions {
   row: readonly { at: number; side: number; chosen: boolean }[];
   /** How far from the route's centre line they stand (the ones left alone a little further out). */
   offset: number;
+  /**
+   * The stretch of the ride (guide distances) over which they rise along the path, the
+   * nearest first, once their note has been read (timeline.ts); none shows before.
+   */
+  revealAt: [number, number];
 }
 
 /**
@@ -57,9 +62,10 @@ export interface LeverOptions {
  * knob. The chosen ones are marked from afar by a champagne ring on their plinth; as the
  * guide nears each of them, in turn, its arm swings forward, it lights up warm and a
  * single pulse runs out on the ground (terrain.ts names it at the same moment). The others stay dim and leaning back: not
- * every lever is thrown.
+ * every lever is thrown. They all rise along the path together, the nearest first, once
+ * their note has been read (timeline.ts), before the energy runs through them.
  */
-export function createLevers(scene: THREE.Scene, { row, offset }: LeverOptions) {
+export function createLevers(scene: THREE.Scene, { row, offset, revealAt }: LeverOptions) {
   const plinthGeometry = new THREE.CylinderGeometry(0.22, 0.3, 0.14, 6, 2).translate(0, 0.07, 0);
   const collarGeometry = new THREE.RingGeometry(0.14, 0.19, 6).rotateX(-Math.PI / 2).translate(0, 0.142, 0);
   const armGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.86, 6).translate(0, 0.43, 0);
@@ -157,7 +163,11 @@ export function createLevers(scene: THREE.Scene, { row, offset }: LeverOptions) 
     update(distance: number, lookingBack: number) {
       for (const lever of levers) {
         const left = lever.at - distance;
-        lever.seen.value = Math.max(1 - smooth(left, 24, 34), lookingBack);
+        // They rise in turn along the row, the nearest first; the far ones come out of the haze.
+        const order = (lever.at - row[0].at) / Math.max(row[row.length - 1].at - row[0].at, 1);
+        const rise = smooth(distance, revealAt[0] + order * (revealAt[1] - revealAt[0]) * 0.6, revealAt[0] + (0.4 + order * 0.6) * (revealAt[1] - revealAt[0]));
+        lever.seen.value = Math.max(rise * (1 - smooth(left, 30, 40)), lookingBack);
+        lever.group.scale.set(1, 0.25 + 0.75 * Math.max(rise, lookingBack), 1);
         const thrown = lever.isChosen ? smooth(distance, lever.at - THROW_FROM, lever.at - THROW_TO) : 0;
         lever.thrown.value = thrown;
         lever.pulse.value = lever.isChosen ? THREE.MathUtils.clamp((distance - (lever.at - THROW_TO)) / PULSE_OVER, 0, 1) : 0;

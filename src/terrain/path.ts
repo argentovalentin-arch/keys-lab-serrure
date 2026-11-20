@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
-import { atan, clamp, cos, float, max, sin, smoothstep, vec2 } from 'three/tsl';
+import { Fn, atan, clamp, cos, float, max, mix, sin, smoothstep, vec2 } from 'three/tsl';
+import { SEA_LEVEL } from './coast';
 
 /**
  * The Terrain's route, shared by the ride (terrain.ts), the relief seen from the summit
@@ -94,18 +95,84 @@ const reliefNode = (x: THREE.Node<'float'>, z: THREE.Node<'float'>, r: THREE.Nod
   return spurs.add(hills).add(folds).mul(envelope).mul(corridor).mul(float(0.5).add(r.div(90).min(1).mul(0.5)));
 };
 
+/**
+ * The landing cove, at the mountain's foot, where the boat comes in (coast.ts, PIER): a beach
+ * curving between two rocky points, its sand rising from the water to the land, the sea
+ * floor falling away offshore so the shallows show; behind the beach, the ground climbs to
+ * meet the mountain. It reshapes the ground only there, in the same matter.
+ */
+const COVE = {
+  /** The waterline on the route's axis (world z), and how it curves out to sea on either side. */
+  shore: 1.5,
+  bay: 0.018,
+  /** The beach's rise inland and the sea floor's fall offshore, per unit; the floor further out. */
+  beach: 0.15,
+  seabed: 0.2,
+  floor: -0.95,
+  /** Where it hands over to the mountain: inland (world z) and to the sides (|x|). */
+  inland: [-26, -10] as const,
+  side: [20, 34] as const,
+} as const;
+/** The two rocky points framing the cove: from their root on the land to their tip out at sea. */
+const CAPES = [
+  { root: [-12, -5], tip: [-15.5, 17], width: [5, 2.6], height: 5.2 },
+  { root: [12.5, -4], tip: [16, 15.5], width: [4.6, 2.4], height: 6.2 },
+] as const;
+
+const coveJS = (x: number, z: number, base: number) => {
+  const s = COVE.shore + COVE.bay * x * x - z;
+  let shaped = s > 0 ? SEA_LEVEL + COVE.beach * s : Math.max(SEA_LEVEL + COVE.seabed * s, COVE.floor);
+  for (const cape of CAPES) {
+    const dx = cape.tip[0] - cape.root[0];
+    const dz = cape.tip[1] - cape.root[1];
+    const length2 = dx * dx + dz * dz;
+    const u = THREE.MathUtils.clamp(((x - cape.root[0]) * dx + (z - cape.root[1]) * dz) / length2, 0, 1);
+    const v = Math.hypot(x - (cape.root[0] + dx * u), z - (cape.root[1] + dz * u));
+    const width = cape.width[0] + (cape.width[1] - cape.width[0]) * u;
+    const across = Math.max(1 - (v / width) ** 2, 0) ** 0.45;
+    const along = (1 - u ** 2.5) * (0.82 + 0.18 * Math.sin(u * 9.4 + cape.root[0]));
+    const rock = 0.38 * Math.sin(x * 1.7 + z * 0.9) * Math.sin(z * 1.3 - x * 1.1) + 0.2 * Math.sin(x * 3.1 - z * 2.3);
+    shaped = Math.max(shaped, SEA_LEVEL - 0.6 + (cape.height + 0.6 + rock) * along * across);
+  }
+  const mask = smoothJS(z, COVE.inland[0], COVE.inland[1]) * (1 - smoothJS(Math.abs(x), COVE.side[0], COVE.side[1]));
+  return base + ((s > 0 ? Math.max(base, shaped) : shaped) - base) * mask;
+};
+const coveNode = (x: THREE.Node<'float'>, z: THREE.Node<'float'>, base: THREE.Node<'float'>) => {
+  const s = x.mul(x).mul(COVE.bay).add(COVE.shore).sub(z);
+  let shaped: THREE.Node<'float'> = s.greaterThan(0).select(s.mul(COVE.beach).add(SEA_LEVEL), max(s.mul(COVE.seabed).add(SEA_LEVEL), COVE.floor));
+  for (const cape of CAPES) {
+    const dx = cape.tip[0] - cape.root[0];
+    const dz = cape.tip[1] - cape.root[1];
+    const length2 = dx * dx + dz * dz;
+    const u = clamp(x.sub(cape.root[0]).mul(dx).add(z.sub(cape.root[1]).mul(dz)).div(length2), 0, 1);
+    const v = vec2(x.sub(u.mul(dx).add(cape.root[0])), z.sub(u.mul(dz).add(cape.root[1]))).length();
+    const width = u.mul(cape.width[1] - cape.width[0]).add(cape.width[0]);
+    const across = max(float(1).sub(v.div(width).pow(2)), 0).pow(0.45);
+    const along = float(1).sub(u.pow(2.5)).mul(sin(u.mul(9.4).add(cape.root[0])).mul(0.18).add(0.82));
+    const rock = sin(x.mul(1.7).add(z.mul(0.9))).mul(sin(z.mul(1.3).sub(x.mul(1.1)))).mul(0.38).add(sin(x.mul(3.1).sub(z.mul(2.3))).mul(0.2));
+    shaped = max(shaped, rock.add(cape.height + 0.6).mul(along).mul(across).add(SEA_LEVEL - 0.6));
+  }
+  const mask = smoothstep(COVE.inland[0], COVE.inland[1], z).mul(float(1).sub(smoothstep(COVE.side[0], COVE.side[1], x.abs())));
+  return mix(base, s.greaterThan(0).select(max(base, shaped), shaped), mask);
+};
+
 /** Ground height at a point of the world (x, z). */
 export const groundAt = (x: number, z: number) => {
   const r = Math.hypot(x, z - SUMMIT_Z);
   const away = Math.max(r - TOP_RADIUS, 0) / MOUNTAIN_RADIUS;
-  return SUMMIT_HEIGHT * Math.max(1 - away, 0) ** STEEPNESS + reliefJS(x, z, r);
+  return coveJS(x, z, SUMMIT_HEIGHT * Math.max(1 - away, 0) ** STEEPNESS + reliefJS(x, z, r));
 };
-/** Same, in a shader. */
-export const groundNode = (x: THREE.Node<'float'>, z: THREE.Node<'float'>) => {
+/**
+ * Same, in a shader: written once in each shader as a function of its own, then called,
+ * rather than repeated wherever the ground is read (several times per material): the
+ * shaders stay small and are ready sooner.
+ */
+const groundFn = Fn(([x, z]: [THREE.Node<'float'>, THREE.Node<'float'>]) => {
   const r = vec2(x, z.sub(SUMMIT_Z)).length();
   const away = max(r.sub(TOP_RADIUS), 0).div(MOUNTAIN_RADIUS);
-  return clamp(float(1).sub(away), 0, 1).pow(STEEPNESS).mul(SUMMIT_HEIGHT).add(reliefNode(x, z, r));
-};
+  return coveNode(x, z, clamp(float(1).sub(away), 0, 1).pow(STEEPNESS).mul(SUMMIT_HEIGHT).add(reliefNode(x, z, r)));
+}).setLayout({ name: 'keysGround', type: 'float', inputs: [{ name: 'x', type: 'float' }, { name: 'z', type: 'float' }] });
+export const groundNode = (x: THREE.Node<'float'>, z: THREE.Node<'float'>): THREE.Node<'float'> => groundFn(x, z) as THREE.Node<'float'>;
 /** Distance from the summit's centre at which the ground stands at height h. */
 export const radiusAtHeight = (h: number) =>
   TOP_RADIUS + (1 - Math.min(Math.max(h / SUMMIT_HEIGHT, 0), 1) ** (1 / STEEPNESS)) * MOUNTAIN_RADIUS;

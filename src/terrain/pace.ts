@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { ACTIVATE_AT, END_AT, PERFORM_AT, STRUCTURE_AT } from './path';
+import { ACTIVATE_ACT, LEVERS_END, LEVERS_FIRST_IMPULSE, MEASURE_ACT, STRUCTURE_ACT, type Act } from './timeline';
 
 /**
  * The ride's rhythm, in one place: how fast the guide goes where, and where the eyes turn.
@@ -26,12 +27,45 @@ interface Zone {
   pace: number;
 }
 
+/**
+ * The crossing, before the path (guide distances, negative: the beach is at about -1.5).
+ * The ride starts at sea, in the boat, looking back at the islands behind it (islands.ts);
+ * the eyes turn to the shore along the coast; the boat crosses, slows as it comes in, comes
+ * alongside the landing stage (coast.ts PIER) and stops; once it has settled, the visitor
+ * steps onto the deck and walks it to the beach behind the guide's light.
+ */
+export const SEA = {
+  start: -64,
+  /** The eyes on the islands, then turning to the shore: [still on them until, turned by]. */
+  turn: [-58.5, -47] as const,
+  /** From here the ride slows for the approach (the boat then some twelve units from its mooring). */
+  approach: -20,
+  /** The visitor's eye in the boat: this far behind the boat's middle (towards the stern). */
+  eyeBehind: 1.25,
+  /** Over how much of the boat's travel it brakes to a stop alongside. */
+  brake: 1.6,
+  /** Once moored, the visitor steps out onto the deck: over this stretch of the boat's (would-be) travel past its mooring. */
+  stepOff: [2.4, 7.4] as const,
+  /** Walking the deck to the beach and onto the land: the ride's pace for it. */
+  ashore: [-3, 8] as const,
+} as const;
+
+/** An act of the narration (timeline.ts) as a slow stretch: its own steady speed. */
+// Its slowing starts within the beat before it, so the act's first beat already runs at its speed.
+const actZone = (why: string, act: Act, ease = 3): Zone => ({ why, from: act.from - 2, to: act.to, ease, pace: act.speed / SPEED });
+
 export const ZONES: Zone[] = [
-  { why: 'Structurer: the beacon charges, the wave runs out, the title reads', from: STRUCTURE_AT - 14, to: STRUCTURE_AT + 7, ease: 6, pace: 0.42 },
-  { why: 'Comprendre, then Clarifier les fondations: two notes, their badges one at a time from just past the beacon, the paving', from: STRUCTURE_AT + 1, to: 118, ease: 4, pace: 0.26 },
-  { why: 'Activer: the beacon charges, the title reads', from: ACTIVATE_AT - 13, to: ACTIVATE_AT + 7, ease: 6, pace: 0.42 },
-  { why: 'The levers: the note, then the left ones, then the right ones', from: ACTIVATE_AT + 8, to: 169, ease: 4, pace: 0.32 },
-  { why: 'Mesurer pour décider: the note, then the chart drawing itself', from: 170, to: 188, ease: 4, pace: 0.3 },
+  { why: 'The sea: the horizon and the islands, behind the boat', from: SEA.start, to: SEA.turn[0], ease: 2.5, pace: 0.09 },
+  { why: 'The eyes turn along the coast to the shore', from: SEA.turn[0], to: SEA.turn[1], ease: 2, pace: 0.3 },
+  { why: 'The crossing', from: SEA.turn[1], to: SEA.approach, ease: 4, pace: 0.72 },
+  { why: 'The approach: the boat slows, comes alongside the landing stage, stops, settles', from: SEA.approach, to: SEA.ashore[0], ease: 5, pace: 0.3 },
+  { why: 'Ashore: along the landing stage, onto the beach', from: SEA.ashore[0], to: SEA.ashore[1], ease: 3, pace: 0.36 },
+  { why: 'Structurer: the beacon charges, the wave runs out, the title reads', from: STRUCTURE_AT - 14, to: STRUCTURE_AT + 2, ease: 6, pace: 0.34 },
+  actZone('Comprendre, the ground examined, its badges; Clarifier les fondations, the paving, its badges', STRUCTURE_ACT),
+  { why: 'Activer: the beacon charges, the title reads', from: ACTIVATE_AT - 13, to: ACTIVATE_AT + 2, ease: 6, pace: 0.34 },
+  actZone('Les bons leviers: the note, then the levers rise', ACTIVATE_ACT),
+  { why: 'The impulse bouncing from lever to lever, each with its badge', from: LEVERS_FIRST_IMPULSE, to: LEVERS_END, ease: 3, pace: 0.22 },
+  actZone('Mesurer pour décider: the note, then the chart drawing itself', MEASURE_ACT),
   { why: 'Performer: the ring, the title, the arrival', from: PERFORM_AT - 6, to: END_AT, ease: 4, pace: 0.6 },
 ];
 
@@ -51,41 +85,45 @@ export function paceAt(distance: number): number {
 }
 
 /**
- * The levers' discovery (terrain.ts): a few levers on the left of the lane, then a few on the
- * right, well apart; only three are thrown, the three actions the summit links to a result
- * (Contenu, Campagnes Ads, CRM: see the summit's badges in terrain.ts), so the levers the
- * visitor sees thrown are the keys they are given at the top. The eyes go to the left ones
- * first, to each chosen lever as it is thrown, come back to the path, then go to the right.
+ * The levers' discovery (terrain.ts, network.ts): five chosen levers, thrown in turn by an
+ * impulse that bounces from one to the next across the path, left, right, left, right, then
+ * right again, the last two side by side: the sequence ends on that double beat, and the
+ * energy is sent on up the path. Between them, levers left alone, set back: not all of them.
+ * The eyes follow the impulse to each lever in turn (terrain.ts, LEVER_FOCUS).
  */
 export const LEVERS = {
   /** Each lever: where it stands along the path, on which side, and whether it is thrown. */
   row: [
-    { at: 141, side: -1, chosen: false },
-    { at: 146, side: -1, chosen: true }, // Contenu
-    { at: 150.5, side: -1, chosen: false },
-    { at: 155, side: 1, chosen: false },
+    { at: 138, side: 1, chosen: false },
+    { at: 141, side: -1, chosen: true }, // Contenu
+    { at: 144, side: -1, chosen: false },
+    { at: 147, side: 1, chosen: true }, // Social media
+    { at: 150, side: 1, chosen: false },
+    { at: 153, side: -1, chosen: true }, // Influence
+    { at: 156, side: -1, chosen: false },
     { at: 159, side: 1, chosen: true }, // Campagnes Ads
-    { at: 163.5, side: 1, chosen: false },
-    { at: 167, side: 1, chosen: true }, // CRM & fidélisation
+    { at: 162, side: -1, chosen: false },
+    { at: 165, side: 1, chosen: true }, // CRM & fidélisation
+    { at: 168, side: -1, chosen: false },
   ],
-  /** When the eyes are on the left ones, then on the right ones: [turning, turned, back, ahead]. */
-  lookLeft: [139, 142, 148.5, 151.5] as const,
-  lookRight: [151.5, 154.5, 165.5, 169] as const,
+  /** When the eyes go to the levers: [turning, turned, back, ahead]. */
+  look: [135, 138.5, 165, 169] as const,
   /** How far the gaze goes from the path ahead to the lever (share of the way). A glance, not a swing. */
-  look: 0.5,
+  share: 0.4,
 } as const;
 
 /** « Mesurer pour décider »'s chart, on the right before the summit: the eyes go to it a little. */
+const { chartBuild, chartDraw, chartGone } = MEASURE_ACT.beats;
 export const CHART = {
   /** Where it stands along the path, and how far right of the lane (narrow screens: closer). */
   at: 193,
   offset: 6.4,
   narrowOffset: 2.6,
-  /** Guide distances: frame and axes draw in, the curve draws, it stays, it goes. */
-  build: [172, 174.5] as const,
-  draw: [174.5, 181.5] as const,
-  gone: [189.5, 192] as const,
-  look: [172.5, 176.5, 188.5, 191.5] as const,
+  /** Guide distances (timeline.ts): frame and axes draw in, the curve draws, it stays, it goes. */
+  build: chartBuild,
+  draw: chartDraw,
+  gone: chartGone,
+  look: [chartBuild[0] - 2, chartBuild[0] + 1.5, chartGone[0] - 0.5, chartGone[1] + 1.5] as [number, number, number, number],
   lookAmount: 0.62,
 } as const;
 
@@ -95,8 +133,7 @@ export const CHART = {
  * starts and ends gently; between the left and right levers it comes back to the path.
  */
 export function lookWeights(distance: number) {
-  const levers = Math.max(plateau(distance, ...LEVERS.lookLeft), plateau(distance, ...LEVERS.lookRight));
-  return { levers: levers * LEVERS.look, chart: plateau(distance, ...CHART.look) * CHART.lookAmount };
+  return { levers: plateau(distance, ...LEVERS.look) * LEVERS.share, chart: plateau(distance, ...CHART.look) * CHART.lookAmount };
 }
 
 /** When a chosen lever is thrown, the eyes are on it: the middle of its throw, before the guide reaches it. */
@@ -112,5 +149,3 @@ export const BEACON = {
   waveReach: 46,
 } as const;
 
-/** How long a landmark's title shows around it (guide distances before and after it). */
-export const WORD = { before: 7, after: 7 } as const;

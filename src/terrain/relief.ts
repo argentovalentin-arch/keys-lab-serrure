@@ -2,8 +2,10 @@ import * as THREE from 'three/webgpu';
 import { SPRITE_GROWTH, coreColor, particleShape } from '../world/sprite';
 import { LAB } from '../core/brand';
 import {
-  attribute, cameraPosition, clamp, color, cos, exp, float, hash, instanceIndex, length, mix, positionLocal, sin, smoothstep, uint, uniform, uv, vec2, vec3,
+  attribute, cameraPosition, clamp, color, cos, exp, float, hash, instanceIndex, mix, positionLocal, sin, smoothstep, uint, uniform, uv, varying, vec2, vec3,
 } from 'three/tsl';
+import { SEA_LEVEL } from './coast';
+import { CONTOUR_SHARE, topoSize, topoTone } from './topography';
 import {
   ACTIVATE_AT, CONTOUR_STEP, END_AT, MOUNTAIN_RADIUS, PATH_HALF, PERFORM_AT, STRUCTURE_AT, SUMMIT_HEIGHT, SUMMIT_Z, centerX,
   centerXNode, groundAt, groundNode, lateralAt, type TrajectoryPoint,
@@ -14,8 +16,6 @@ const WARM = LAB.light;
 const LOW = '#8fa6c8'; // far below, in the haze
 const TOP_RADIUS = 9; // as in path.ts: the flat top
 const JOURNEY_POINTS = 360;
-const PLAIN_RINGS = 18;
-const PLAIN_RING_STEP = 24;
 
 /**
  * The whole mountain, fixed in place, for the view back from the summit. During the ride
@@ -33,6 +33,11 @@ export function createRelief(scene: THREE.Scene, count: number) {
   // every point's drop from the top multiplied by this (1 = the ground as ridden), so the
   // start lies far down and the path visibly descends. The top itself does not move.
   const depth = uniform(1);
+  /** While crossing: 1, and where the ride's field band starts (the guide's distance). */
+  const bandOn = uniform(0);
+  const bandAt = uniform(0);
+  /** Seen from the sea, low and far, the points are drawn finer and quieter than from the top. */
+  const fromSea = uniform(0);
   const deepenNode = (y: THREE.Node<'float'>) => float(SUMMIT_HEIGHT).sub(float(SUMMIT_HEIGHT).sub(y).mul(depth));
   const laneCount = Math.floor(count * 0.18);
   const isLane = instanceIndex.lessThan(uint(laneCount));
@@ -56,18 +61,17 @@ export function createRelief(scene: THREE.Scene, count: number) {
   const slope2 = gradX.mul(gradX).add(gradZ.mul(gradZ)).max(0.0004);
   const level = h0.div(CONTOUR_STEP).add(0.5).floor().mul(CONTOUR_STEP).min(SUMMIT_HEIGHT);
   const shift = h0.sub(level).div(slope2).clamp(-3, 3);
-  const onContour = seedC.lessThan(0.5);
+  const onContour = seedC.lessThan(CONTOUR_SHARE);
   const mountainX = onContour.select(looseX.sub(gradX.mul(shift)), looseX);
   const mountainZ = onContour.select(looseZ.sub(gradZ.mul(shift)), looseZ);
   const mountainY = groundNode(mountainX, mountainZ);
-  // How the ground there faces the light (low, from one side and from the valley): the spurs'
-  // flanks turned to it read bright, the others in shade, so the volumes show. Its crests
-  // (where the ground falls away on both sides) are lit along their line.
+  // Its tone (topography.ts): how the ground there faces the light, and whether it lies on a
+  // crest (where the ground falls away on both sides) or in a hollow. As the mountain
+  // deepens, its slopes steepen with it.
   const normal = vec3(gradX.negate(), float(1).div(depth), gradZ.negate()).normalize();
-  const facing = normal.dot(vec3(0.78, 0.5, 0.38).normalize()).max(0);
   const around = groundNode(mountainX.add(6), mountainZ).add(groundNode(mountainX.sub(6), mountainZ))
     .add(groundNode(mountainX, mountainZ.add(6))).add(groundNode(mountainX, mountainZ.sub(6)));
-  const crest = smoothstep(0.5, 3.5, mountainY.mul(4).sub(around));
+  const cavity = clamp(mountainY.mul(4).sub(around).mul(0.3), -1, 1);
   // The landmarks stand out of the relief: a ring of light round each, on the ground.
   const ringAt = (x: number, z: number) => {
     const d = vec2(mountainX.sub(x), mountainZ.sub(z)).length();
@@ -97,23 +101,32 @@ export function createRelief(scene: THREE.Scene, count: number) {
   const drop = float(SUMMIT_HEIGHT).sub(isLane.select(laneY, mountainY)).div(SUMMIT_HEIGHT).clamp(0, 1);
   const haze = drop.mul(clamp(depth.sub(1).mul(1.5), 0, 1));
   const shape = particleShape();
-  const lit = isLane.select(float(0.6), crest.mul(0.7).add(landmarks).min(1));
-  material.colorNode = coreColor(mix(mix(color(CREAM), color(WARM), lit), color(LOW), haze.mul(0.45)), shape.core).mul(1.25);
-  const disc = clamp(float(1).sub(length(uv().sub(0.5)).mul(2)), 0, 1);
+  const worldPoint = vec3(isLane.select(laneX, mountainX), deepenNode(isLane.select(laneY, mountainY)), isLane.select(laneZ, mountainZ));
+  const tone = topoTone(normal, cavity, cameraPosition.sub(worldPoint).normalize());
+  // The lane: the route itself, in the light tone, as on the ride; the landmarks warm.
+  const base = isLane.select(mix(color(CREAM), color(WARM), 0.6), mix(tone.colour, color(WARM), landmarks.min(1)));
+  material.colorNode = coreColor(varying(mix(base, color(LOW), haze.mul(0.45))), shape.core).mul(1.25);
   // The lane fades over its last stretch, right under the camera on the summit, where
   // close-up particles would blot out the view rather than draw the route.
   const laneFade = float(1).sub(smoothstep(END_AT - 45, END_AT - 12, p)).max(0.15);
-  const shading = facing.mul(1.5).add(0.3).add(crest.mul(1.3)).add(landmarks.mul(1.2));
-  const strength = isLane.select(laneFade.mul(0.85), onContour.select(float(1.25), float(0.8)).mul(shading));
-  material.opacityNode = shape.alpha.mul(strength).mul(float(1).sub(haze.mul(isLane.select(float(0.2), float(0.35))))).mul(shown);
+  const shading = tone.strength.add(landmarks.mul(1.2));
+  // Under the sea (coast.ts) there is no mountain to see; while crossing, the strip of
+  // ground the ride's own field draws ahead is left to it, so nothing is drawn twice.
+  const groundY = isLane.select(laneY.sub(0.12), mountainY);
+  const dry = smoothstep(SEA_LEVEL - 0.05, SEA_LEVEL + 0.15, groundY);
+  const worldX = isLane.select(laneX, mountainX);
+  const along = isLane.select(laneZ, mountainZ).negate();
+  const inBand = smoothstep(17, 14, worldX.sub(centerXNode(along)).abs())
+    .mul(smoothstep(bandAt.sub(12), bandAt.sub(8), along)).mul(smoothstep(bandAt.add(60), bandAt.add(52), along));
+  const visible = dry.mul(float(1).sub(inBand.mul(bandOn))).mul(float(1).sub(fromSea.mul(0.45)));
+  const strength = isLane.select(laneFade.mul(0.85), onContour.select(float(1.2), float(0.75)).mul(shading));
+  material.opacityNode = shape.alpha.mul(varying(strength.mul(float(1).sub(haze.mul(isLane.select(float(0.2), float(0.35))))).mul(visible))).mul(shown);
   // Seen from far up the mountain, the particles need to be larger than underfoot; the
-  // contour lines most of all, as they draw the mountain's shape from a distance.
-  // Far down the mountain, a point keeps a readable size on screen: the whole relief shows,
-  // not only what is near.
-  const fromEye = vec3(isLane.select(laneX, mountainX), deepenNode(isLane.select(laneY, mountainY)), isLane.select(laneZ, mountainZ))
-    .sub(cameraPosition).length();
-  material.scaleNode = isLane.select(float(0.16), onContour.select(float(0.26), float(0.2))).add(seedC.pow(6).mul(0.12)).mul(SPRITE_GROWTH)
-    .mul(fromEye.div(55).max(1).pow(0.85));
+  // contour lines most of all, as they draw the mountain's shape from a distance
+  // (topography.ts, the same rule as for the islands).
+  const fromEye = worldPoint.sub(cameraPosition).length();
+  material.scaleNode = isLane.select(float(0.16).add(seedC.pow(6).mul(0.12)).mul(SPRITE_GROWTH).mul(fromEye.div(55).max(1).pow(0.85)), topoSize(fromEye, onContour, seedC))
+    .mul(float(1).sub(fromSea.mul(0.5)));
   const points = new THREE.Sprite(material);
   points.count = count;
   points.frustumCulled = false;
@@ -133,39 +146,6 @@ export function createRelief(scene: THREE.Scene, count: number) {
   surface.renderOrder = -2;
   surface.visible = false;
   scene.add(surface);
-
-  // The valley floor around the mountain, out towards the horizon, at the start's level:
-  // rings of faint particles, continuing the contour lines. It only shows as the mountain
-  // deepens, and gives the drop below the summit a scale: the plain far down, flat to the
-  // horizon, the mountain standing out of it.
-  const plainCount = Math.floor(count * 0.3);
-  const plainSeedA = hash(instanceIndex.add(uint(count * 3)));
-  const plainSeedB = hash(instanceIndex.add(uint(count * 4)));
-  const plainRing = plainSeedB.pow(1.4).mul(PLAIN_RINGS).floor();
-  const plainRadius = plainRing.mul(PLAIN_RING_STEP).add(footprint + PLAIN_RING_STEP);
-  const plainAngle = plainSeedA.mul(Math.PI * 2);
-  const plainMaterial = new THREE.SpriteNodeMaterial({
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  plainMaterial.positionNode = vec3(
-    cos(plainAngle).mul(plainRadius),
-    deepenNode(float(0)),
-    sin(plainAngle).mul(plainRadius).add(SUMMIT_Z),
-  );
-  plainMaterial.colorNode = color(LOW);
-  const plainFar = float(1).sub(smoothstep(footprint + 120, footprint + PLAIN_RINGS * PLAIN_RING_STEP, plainRadius));
-  const deepened = clamp(depth.sub(1).mul(1.5), 0, 1);
-  // It recedes as the eyes rise to the curve, so it never runs behind the chart.
-  const plainShown = uniform(1);
-  plainMaterial.opacityNode = disc.mul(disc).mul(0.9).mul(plainFar).mul(deepened).mul(plainShown).mul(shown);
-  // Larger further out, so the far rings still read as lines.
-  plainMaterial.scaleNode = plainRadius.sub(footprint).mul(0.005).add(0.3);
-  const plain = new THREE.Sprite(plainMaterial);
-  plain.count = plainCount;
-  plain.frustumCulled = false;
-  scene.add(plain);
 
   // The visitor's line along the route, from the start to the summit.
   const linePositions = new Float32Array(JOURNEY_POINTS * 2 * 3);
@@ -219,11 +199,31 @@ export function createRelief(scene: THREE.Scene, count: number) {
     /** 0..1: the mountain, the visitor's line and the start mark fade in together. */
     setShown(amount: number) {
       shown.value = amount;
+      bandOn.value = 0;
+      fromSea.value = 0;
       points.visible = amount > 0.001;
-      plain.visible = amount > 0.001;
       surface.visible = amount > 0.5;
       start.visible = amount > 0.001;
       line.visible = amount > 0.001 && line.userData.ready === true;
+    },
+    /** How much it shows now. */
+    get shownAmount() {
+      return shown.value;
+    },
+    /**
+     * While crossing: the mountain seen from the sea, all of it but the band the ride's
+     * field draws (from the guide's distance `at`); `amount` 0..1.
+     */
+    setCrossing(amount: number, at: number) {
+      this.setShown(amount);
+      bandOn.value = 1;
+      fromSea.value = 1;
+      bandAt.value = at;
+      // Its unseen ground stays: the open sea beyond the mountain does not show through it,
+      // so the horizon's line stops where the land stands in front of it.
+      surface.visible = amount > 0.5;
+      // The start's column is for the view from the top; at the shore it would blind.
+      start.visible = false;
     },
     /** Lays the visitor's line along the route, once the ride is over. */
     setJourney(trajectory: TrajectoryPoint[], end: number, width: number) {
@@ -244,10 +244,6 @@ export function createRelief(scene: THREE.Scene, count: number) {
       depth.value = amount;
       start.position.y = this.deepen(startGround) + 9;
     },
-    /** 0..1: the valley plain, faded while the curve is on screen. */
-    setPlainShown(amount: number) {
-      plainShown.value = amount;
-    },
     /** A height on the ridden ground, where it now shows on the deepened mountain. */
     deepen(y: number) {
       return SUMMIT_HEIGHT - (SUMMIT_HEIGHT - y) * depth.value;
@@ -259,14 +255,12 @@ export function createRelief(scene: THREE.Scene, count: number) {
     reset() {
       line.userData.ready = false;
       this.setDepth(1);
-      this.setPlainShown(1);
       this.setShown(0);
     },
     dispose() {
       // Not points.geometry: every three.js Sprite shares one geometry, the story's
       // particles included; disposing it would break them.
       material.dispose();
-      plainMaterial.dispose();
       surfaceGeometry.dispose();
       surfaceMaterial.dispose();
       lineGeometry.dispose();

@@ -50,6 +50,8 @@ export class Epilogue {
   private readonly tagLayer = document.querySelector<HTMLElement>('#terrain-tags')!;
   private readonly tagElements = new Map<string, {
     root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number; clear: number; quiet: boolean; confirmed: boolean;
+    /** Where it stood last frame (screen y of its foot), if it was placed. */
+    ly?: number;
     holo: { wrap: HTMLElement; ctx: CanvasRenderingContext2D; kind: Illustration; ratio: number; scale: number } | null;
   }>();
   private noteText: string | null = null;
@@ -326,7 +328,7 @@ export class Epilogue {
       // Its hologram, over the badge, while it is the one in focus (ui/holograms.ts): the
       // badge, its words and its drawing, one composition.
       if (view.holo && !element.holo) {
-        const scale = window.innerWidth < 700 ? 0.72 : 1;
+        const scale = window.innerWidth < 700 ? 0.7 : 1;
         const ratio = Math.min(window.devicePixelRatio || 1, 2);
         const wrap = document.createElement('span');
         wrap.className = 'terrain-tag__holo';
@@ -370,8 +372,14 @@ export class Epilogue {
       // moves just clear of it, above or below, whichever is nearer and free (its thread
       // still reaches its point).
       const height = element.height + 4;
+      // The whole card (its hologram included) stays on screen.
+      ly = Math.min(Math.max(ly, height + 8), h - 8);
       const hits = (y: number) => placed.find((r) => lx - half < r.right && lx + half > r.left && y - height < r.bottom && y > r.top);
-      for (let pass = 0; pass < 6; pass++) {
+      // A badge handing over to the next (its hologram folding away) is not moved: it fades
+      // where it stood, rather than jumping across the screen as it goes.
+      const folding = Boolean(view.holo && view.holo.fold > 0);
+      if (folding && element.ly !== undefined) ly = element.ly;
+      for (let pass = 0; pass < (folding ? 0 : 6); pass++) {
         const hit = hits(ly);
         if (!hit) break;
         const above = hit.top - 2;
@@ -385,8 +393,9 @@ export class Epilogue {
       // Where there is no free room at all (a crowded phone screen), the label steps back,
       // fading out until there is, rather than lying over a text.
       const blocked = Boolean(hits(ly));
-      element.clear += ((blocked ? 0 : 1) - element.clear) * 0.18;
+      element.clear += ((blocked ? 0 : 1) - element.clear) * (blocked ? 0.4 : 0.18);
       if (!blocked) placed.push({ left: lx - half - 4, right: lx + half + 4, top: ly - height, bottom: ly });
+      element.ly = ly;
       element.root.style.transform = `translate(${lx.toFixed(1)}px, ${ly.toFixed(1)}px)`;
       // Secondary to the note: never quite as bright.
       element.root.style.opacity = (view.opacity * 0.92 * element.clear).toFixed(3);

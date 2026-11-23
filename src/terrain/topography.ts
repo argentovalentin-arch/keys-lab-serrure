@@ -31,6 +31,11 @@ export const CONTOUR_SHARE = 0.5;
 const SHADE = new THREE.Color(BRAND.champagne).lerp(new THREE.Color(BRAND.navy60), 0.55);
 const MID = new THREE.Color(BRAND.champagne);
 const LIT = new THREE.Color(BRAND.champagne).lerp(new THREE.Color(BRAND.offwhite), 0.65);
+// With more contrast (see `contrast`): a deep champagne for the hollows and the slopes turned
+// away, darkened towards the navy (never black, never another hue), and a bright champagne
+// for the crests, the edges and the faces in the light.
+const DEEP = new THREE.Color(BRAND.champagne).lerp(new THREE.Color(BRAND.navy), 0.62);
+const BRIGHT = new THREE.Color(BRAND.champagne).lerp(new THREE.Color(BRAND.offwhite), 0.85);
 
 export interface Tone {
   /** 0 (deep shade) .. 1 (full light). */
@@ -40,6 +45,8 @@ export interface Tone {
   strength: THREE.Node<'float'>;
   /** 0..1: on a crest or a break of slope. */
   crest: THREE.Node<'float'>;
+  /** How much larger (> 1) or finer (< 1) the point is drawn: the light ones a little larger. */
+  size: THREE.Node<'float'>;
 }
 
 /**
@@ -47,7 +54,16 @@ export interface Tone {
  * (`cavity`: > 0 on a crest, < 0 in a hollow, about -1..1) and, optionally, the direction
  * from it to the eye, for the skylines (a silhouette turned to the light catches it).
  */
-export function topoTone(normal: THREE.Node<'vec3'>, cavity: THREE.Node<'float'>, toEye?: THREE.Node<'vec3'>): Tone {
+/**
+ * `contrast` (0..1) widens the reading: from 0, the tones as they were first set, to 1, a
+ * more marked topography: the shade and the hollows go down to a deep champagne and give
+ * less light, the crests, edges and faces in the light go up to a bright champagne and give
+ * more; the points follow, finer in the shade, a little larger in the light. The tones stay
+ * champagne throughout: no new hue, and the dark ones never black.
+ */
+export function topoTone(
+  normal: THREE.Node<'vec3'>, cavity: THREE.Node<'float'>, toEye?: THREE.Node<'vec3'>, contrast: THREE.Node<'float'> = float(0),
+): Tone {
   const facing = normal.dot(vec3(KEY.x, KEY.y, KEY.z));
   // Wrapped, so the shade has its own gradations rather than one flat dark.
   const lit = clamp(facing.add(0.35).div(1.35), 0, 1);
@@ -60,9 +76,18 @@ export function topoTone(normal: THREE.Node<'vec3'>, cavity: THREE.Node<'float'>
     tone = tone.add(rim.mul(0.35));
   }
   tone = clamp(tone, 0, 1);
-  const colour = mix(mix(color(SHADE), color(MID), smoothstep(0, 0.55, tone)), color(LIT), smoothstep(0.55, 1, tone));
-  const strength = float(0.3).add(tone.mul(0.95)).add(crest.mul(0.3));
-  return { tone, colour, strength, crest };
+  const soft = mix(mix(color(SHADE), color(MID), smoothstep(0, 0.55, tone)), color(LIT), smoothstep(0.55, 1, tone));
+  const softStrength = float(0.3).add(tone.mul(0.95)).add(crest.mul(0.3));
+  // The marked reading: the tone pulled apart round its middle; the breaks of slope (crests
+  // and hollows alike) given their own weight, light on a crest, deep in a hollow.
+  const marked = clamp(tone.sub(0.5).mul(1.7).add(0.5).add(crest.mul(0.24)).sub(hollow.mul(0.3)), 0, 1);
+  const deep = mix(mix(color(DEEP), color(SHADE), smoothstep(0, 0.4, marked)), color(MID), smoothstep(0.3, 0.65, marked));
+  const strong = mix(deep, color(BRIGHT), smoothstep(0.62, 1, marked).add(crest.mul(0.35)).min(1));
+  const strongStrength = float(0.13).add(marked.mul(marked).mul(1.35)).add(crest.mul(0.6));
+  const colour = mix(soft, strong, contrast);
+  const strength = mix(softStrength, strongStrength, contrast);
+  const size = mix(float(1), mix(float(0.82), float(1.2), marked), contrast);
+  return { tone, colour, strength, crest, size };
 }
 
 /**

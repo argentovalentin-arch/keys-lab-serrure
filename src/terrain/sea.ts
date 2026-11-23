@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
-  abs, cameraPosition, color, cos, exp, float, floor, hash, instanceIndex, max, mix, pow, reflect, round, sin, smoothstep,
-  uint, uniform, vec2, vec3,
+  abs, cameraPosition, color, cos, exp, float, floor, hash, instanceIndex, max, mix, mx_noise_float, pow,
+  reflect, round, sin, smoothstep, uint, uniform, vec2, vec3,
 } from 'three/tsl';
 import { DUSK, SEA_LEVEL, waveNode } from './coast';
 import { SUMMIT_Z, groundNode } from './path';
@@ -48,6 +48,12 @@ export function createSea(scene: THREE.Scene, { time, near: nearCount, far: farC
   const boat = uniform(new THREE.Vector4(0, 1000, 0, 0));
   /** 0..1: the glints and the sky's light, faded while the curve is drawn at the end. */
   const glints = uniform(1);
+  /**
+   * How far out round the mountain the far layer reaches (world units): out to its last ring
+   * while riding; nearer for the closing view, so its horizon comes down the screen and the
+   * sky over it holds the closing curve (terrain.ts). Its outer rings fade, from the edge in.
+   */
+  const reach = uniform(1e6);
 
   const shape = particleShape();
   const light = vec3(DUSK.x, DUSK.y, DUSK.z);
@@ -69,34 +75,89 @@ export function createSea(scene: THREE.Scene, { time, near: nearCount, far: farC
     const clear = smoothstep(0.15, 1.1, depth).mul(0.6).add(0.4);
     let wake: THREE.Node<'float'> = float(0);
     let dry: THREE.Node<'float'> = float(1);
+    let parted: THREE.Node<'vec2'> = vec2(0, 0);
+    let surface: THREE.Node<'vec3'> = wave.normal;
+    let wakeHeight: THREE.Node<'float'> = float(0);
+    /** How much light the water gives where the boat's waves run: more on their crests, less in their troughs. */
+    let wakeShade: THREE.Node<'float'> = float(1);
     if (nearLayer) {
-      // The boat: a wave at its bow, and its wake opening behind it in a V.
+      // The boat moving over the water, as water answers it (from its real place, heading and
+      // speed, `boat.w`, terrain.ts). The sea's own surface takes the boat's waves: along the
+      // hull the water is pushed aside and raised at the bow; from the stern, the waves a moving
+      // hull leaves (a Kelvin wake): divergent crests running out and back on either side,
+      // transverse ones between them, all within a V of about 19.5 degrees that widens behind
+      // and dies away. They tilt the surface, so the last light glints off it differently:
+      // the wake is read as water is, in its reflections. Right behind the hull, the water is
+      // broken and smoothed in turn, a little foam at the stern only.
       const heading = boat.z;
+      const go = boat.w;
       const fwd = vec2(sin(heading), cos(heading).negate());
+      const sideDir = vec2(fwd.y.negate(), fwd.x);
+      /** The wake's height at a point of the water (world units), from the boat's waves. */
+      const boatWaves = (px: THREE.Node<'float'>, pz: THREE.Node<'float'>) => {
+        const off = vec2(px.sub(boat.x), pz.sub(boat.y));
+        const ahead = off.dot(fwd);
+        const across = abs(off.dot(sideDir));
+        const behind = ahead.negate().sub(2.25);
+        const astern = smoothstep(-0.4, 0.8, behind);
+        const dies = exp(behind.div(-9)).mul(smoothstep(17, 10, behind));
+        const edge = behind.mul(0.354).add(0.6);
+        const inside = smoothstep(edge.add(0.9), edge.sub(0.2), across);
+        // Divergent crests, at about 35 degrees to the track, running outward as the boat goes on.
+        const divergent = sin(across.mul(0.82).add(behind.mul(0.57)).mul(4.2).sub(time.mul(3))).mul(smoothstep(edge.mul(0.2), edge.mul(0.85), across));
+        // Transverse crests across the track, between the arms.
+        const transverse = sin(behind.mul(3.4).sub(time.mul(3.2))).mul(float(1).sub(smoothstep(edge.mul(0.35), edge, across))).mul(0.7);
+        // The bow wave, and the water lifted along the hull's sides.
+        const hullHalf = float(0.82).mul(max(float(1).sub(ahead.div(2.4).pow(2)), 0).pow(0.6));
+        const byHull = exp(across.sub(hullHalf).div(0.38).pow(2).negate()).mul(smoothstep(2.7, 1.9, abs(ahead)));
+        const bow = exp(ahead.sub(2.3).div(0.5).pow(2).negate()).mul(exp(across.div(0.8).pow(2).negate()));
+        return divergent.mul(0.55).add(transverse.mul(0.45)).mul(inside).mul(dies).mul(astern).mul(0.12)
+          .add(bow.mul(0.08)).add(byHull.mul(0.035)).mul(go);
+      };
       const offset = vec2(x.sub(boat.x), z.sub(boat.y));
       const ahead = offset.dot(fwd);
-      const across = abs(offset.x.mul(fwd.y.negate()).add(offset.y.mul(fwd.x)));
-      const behind = ahead.negate().sub(2.2);
-      const arms = exp(across.sub(behind.mul(0.36)).sub(0.75).div(0.32).pow(2).negate())
-        .mul(exp(behind.mul(-0.07))).mul(behind.greaterThan(0).select(float(1), float(0)));
-      const trough = exp(across.div(0.9).pow(2).negate()).mul(exp(behind.mul(-0.12))).mul(behind.greaterThan(-0.4).select(float(1), float(0)));
-      const bow = exp(ahead.sub(2.35).div(0.45).pow(2).negate()).mul(exp(across.div(0.75).pow(2).negate()));
-      wake = arms.mul(0.9).add(trough.mul(0.45)).add(bow.mul(0.8)).mul(boat.w);
+      const sideways = offset.dot(sideDir);
+      const across = abs(sideways);
+      const behind = ahead.negate().sub(2.25);
+      const astern = smoothstep(-0.4, 0.8, behind);
+      wakeHeight = boatWaves(x, z);
+      // The surface's tilt from those waves (read a little way off), added to the swell's.
+      const E = 0.12;
+      const tiltX = boatWaves(x.add(E), z).sub(wakeHeight).div(E);
+      const tiltZ = boatWaves(x, z.add(E)).sub(wakeHeight).div(E);
+      // Right behind the hull the water is broken (small, quick ripples), then smoother than
+      // the sea round it for a while: the wake's calm band.
+      const band = exp(across.div(behind.mul(0.1).add(0.6)).pow(2).negate()).mul(astern).mul(go);
+      const broken = band.mul(exp(behind.div(-2.5)));
+      const calmBand = band.mul(float(1).sub(exp(behind.div(-2.5)))).mul(exp(behind.div(-12)));
+      const chop = mx_noise_float(vec3(x.mul(2.2), z.mul(2.2), time.mul(1.4)));
+      const swellTilt = vec3(wave.normal.x, 0, wave.normal.z).mul(float(1).sub(calmBand.mul(0.6)));
+      surface = vec3(swellTilt.x.sub(tiltX).add(chop.mul(broken).mul(0.35)), 1, swellTilt.z.sub(tiltZ).add(chop.mul(broken).mul(0.2))).normalize();
+      // The points themselves move with the water: pushed out by the hull, spread as the V opens.
+      const hullHalf = float(0.82).mul(max(float(1).sub(ahead.div(2.4).pow(2)), 0).pow(0.6));
+      const byHull = exp(across.sub(hullHalf).div(0.38).pow(2).negate()).mul(smoothstep(2.7, 1.9, abs(ahead)));
+      const opening = exp(behind.div(-8)).mul(astern).mul(smoothstep(0, 1.4, across)).mul(smoothstep(behind.mul(0.354).add(1.4), behind.mul(0.354), across));
+      // The water thins out in the hull's track and gathers along the V's arms.
+      parted = sideDir.mul(sideways.sign()).mul(byHull.mul(0.2).add(opening.mul(0.3)).mul(go));
+      // The crests catch the light as the sea's own crests do; the troughs between them darken.
+      wakeShade = float(1).add(wakeHeight.div(0.12).mul(3.5)).max(0.15);
+      height = height.add(wakeHeight).add(chop.mul(broken).mul(0.02));
+      // A little foam at the stern only, in uneven patches, gone within a few lengths.
+      const foamy = smoothstep(0.1, 0.65, mx_noise_float(vec3(x.mul(1.7), z.mul(1.7), time.mul(0.9))));
+      wake = broken.mul(foamy).mul(0.55);
       // No sea inside the hull.
       dry = smoothstep(0.8, 1.15, ahead.div(2.45).pow(2).add(across.div(0.86).pow(2)));
-      height = height.add(sin(behind.mul(2.6).sub(time.mul(3.2))).mul(0.05).mul(arms.add(trough)).mul(boat.w))
-        .add(bow.mul(0.08).mul(boat.w));
     }
-    const position = vec3(x, level.add(height).add(foam.mul(0.04)), z);
+    const position = vec3(x.add(parted.x), level.add(height).add(foam.mul(0.04)), z.add(parted.y));
     // The glints: the surface turned to mirror the last light towards the eye.
     const view = position.sub(cameraPosition).normalize();
-    const mirrored = max(reflect(view, wave.normal).dot(light), 0);
+    const mirrored = max(reflect(view, surface).dot(light), 0);
     const glint = pow(mirrored, 70).mul(twinkle(time, seed, 0.85)).mul(2.6).add(pow(mirrored, 7).mul(0.35));
-    const crest = smoothstep(0.05, 0.3, wave.height.mul(calm));
+    const crest = smoothstep(0.05, 0.3, wave.height.mul(calm).add(wakeHeight.mul(1.5)));
     const fromEye = position.sub(cameraPosition).length();
     const haze = smoothstep(1500, 260, fromEye);
     const base = float(0.3).add(crest.mul(0.25)).mul(haze.mul(0.75).add(0.25));
-    const brightness = base.mul(clear).add(glint.mul(glints)).add(foam.mul(1.3)).add(wake);
+    const brightness = base.mul(clear).mul(wakeShade).add(glint.mul(glints)).add(foam.mul(1.3)).add(wake);
     const tint = mix(mix(vec3(0.62, 0.7, 0.86), vec3(1, 1, 1), crest.mul(0.5).add(haze.mul(0.3))).mul(color(LAB.dust)),
       color(BRAND.champagne).mul(1.35), glint.mul(glints).add(foam).add(wake).min(1));
     const size = float(0.03).add(fromEye.mul(0.0042)).mul(float(1).add(glint.mul(glints).mul(0.5)));
@@ -111,7 +172,8 @@ export function createSea(scene: THREE.Scene, { time, near: nearCount, far: farC
     material.positionNode = w.position;
     material.colorNode = w.tint;
     // The far layer steps aside where the near one is, during the crossing.
-    const aside = nearLayer ? nearShown : float(1).sub(nearShown.mul(smoothstep(30, 24, vec2(x, z).sub(centre).length())));
+    const aside = nearLayer ? nearShown : float(1).sub(nearShown.mul(smoothstep(30, 24, vec2(x, z).sub(centre).length())))
+      .mul(smoothstep(reach, reach.mul(0.9), vec2(x, z.sub(SUMMIT_Z)).length()));
     material.opacityNode = shape.alpha.mul(w.brightness).mul(aside).mul(shown).min(1);
     material.scaleNode = w.size;
     const sprite = new THREE.Sprite(material);
@@ -167,6 +229,10 @@ export function createSea(scene: THREE.Scene, { time, near: nearCount, far: farC
       level.value = view.level;
       swell.value = view.swell;
       glints.value = view.glints;
+    },
+    /** How far out the far layer reaches (world units round the mountain): see `reach`. */
+    setReach(radius: number) {
+      reach.value = radius;
     },
     objects: [nearLayer.sprite, farLayer.sprite],
     dispose() {

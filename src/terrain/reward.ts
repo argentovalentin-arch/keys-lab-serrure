@@ -59,6 +59,15 @@ function ribbon(points: THREE.Vector3[], width: number, out: { position: number[
  * earned by steering, plus their moves as short ups and downs. No two rides give the
  * same curve.
  */
+/**
+ * Where the chart's time axis stands, as a share of the view's half-height over its middle
+ * (the horizon is a little higher: the axis runs just under it, the curve above), and its
+ * size against the full chart (in proportion). The closing words and choices follow it
+ * (style.css, .terrain-ui__end).
+ */
+const CURVE_AXIS = { wide: 0.25, narrow: 0.3 };
+const CURVE_SIZE = { wide: 0.8, narrow: 0.7 };
+
 export function createReward(scene: THREE.Scene) {
   // Everything is laid out square to the final gaze (see start), so the chart's verticals
   // stay upright on screen rather than leaning in perspective.
@@ -154,10 +163,14 @@ export function createReward(scene: THREE.Scene) {
       const halfHeight = Math.tan(THREE.MathUtils.degToRad(fov / 2)) * away;
       const centre = 0;
       // Entirely in the upper half of the view once the eyes have risen: the mountain and
-      // the route keep the lower half to themselves.
-      const base = centre + 0.04 * halfHeight;
-      const rise = 0.66 * halfHeight;
-      const width = Math.min(halfHeight * aspect * 2 * 0.62, halfHeight * 2.6);
+      // the route keep the lower half to themselves. Its time axis stands up by the horizon,
+      // so the curve reads against the sky rather than over the sea, the chart a little
+      // smaller (in proportion) to stay whole under the top of the view.
+      const narrow = aspect < 0.9;
+      const size = narrow ? CURVE_SIZE.narrow : CURVE_SIZE.wide;
+      const base = centre + (narrow ? CURVE_AXIS.narrow : CURVE_AXIS.wide) * halfHeight;
+      const rise = 0.66 * size * halfHeight;
+      const width = Math.min(halfHeight * aspect * 2 * 0.62, halfHeight * 2.6) * size;
       const lineWidth = away * 0.0032;
       // The camera faces +z, so screen-right is -x: time runs left to right on screen.
       const xAt = (t: number) => -(t - 0.5) * width;

@@ -10,20 +10,21 @@ import { createReward } from './reward';
 import { createRelief } from './relief';
 import { THROW_FROM, THROW_TO, createLevers } from './levers';
 import { createNetwork } from './network';
-import { createPavement } from './pavement';
+import { FIRST_FORMS, createPavement } from './pavement';
 import { noteAt, type Note } from './notes';
 import { PILLARS, STEPS, createMonitor, stepAt } from './monitor';
 import { createSummit } from './summit';
 import { createSea } from './sea';
+import { createWake } from './wake';
 import { createBoat } from './boat';
 import { ISLANDS_VIEW, createIslands } from './islands';
 import { PIER, SEA_LEVEL } from './coast';
 import { createPier } from './pier';
-import { ACTIVATE_ACT, ENDING, STRUCTURE_ACT, TITLES } from './timeline';
+import { ACTIVATE_ACT, ENDING, PAVING_AT, STRUCTURE_ACT, TITLES } from './timeline';
 import { createCrown } from './crown';
 import { SLOTS, createProjections, graduatedRing, type ProjectionSlot } from './projection';
 import type { Illustration } from '../ui/holograms';
-import { BEACON, CHART, LEVERS, LEVER_FOCUS, SEA, SPEED, lookWeights, paceAt, plateau } from './pace';
+import { BEACON, CHART, LEVERS, LEVER_FOCUS, SEA, SPEED, lookWeights, paceAt, plateau, responseAt } from './pace';
 import { SPRITE_GROWTH, coreColor, particleShape, twinkle } from '../world/sprite';
 import type { IconName } from './icons';
 import { BRAND, LAB } from '../core/brand';
@@ -155,6 +156,7 @@ const RELIEF_IN = ENDING.reliefIn;
 const FIELD_OUT = ENDING.fieldOut;
 // The light band ahead goes before the turn sweeps it across the view.
 const FRONT_HORIZON_OUT = ENDING.frontHorizonOut;
+
 // 4. The reveal: after a moment looking down, the eyes rise to the horizon, where the
 //    curve draws itself; then the closing choices.
 // The key ring, now in hand (summit.ts): taken at the end of the actions, held through the
@@ -172,6 +174,11 @@ const CHOICES_AT = ENDING.choicesAt;
 // islands in view (islands.ts).
 const LOOK_DOWN_PITCH = -0.46;
 const HORIZON_PITCH = -0.3; // low enough that the far half of the climb, deep below, stays in view under the curve
+/**
+ * How far out round the mountain the sea reaches in the closing view (sea.ts, setReach); on a
+ * portrait phone, where the closing words and choices take more height, a little nearer.
+ */
+const CLOSING_REACH = { wide: 380, narrow: 300 };
 /** On the summit the eye stands a little higher, for the view. */
 const SUMMIT_EYE = CAMERA_HEIGHT + 2.2;
 /**
@@ -207,13 +214,22 @@ const smooth = THREE.MathUtils.smoothstep;
  * little to the badge in focus. The badges stand close to the path, drawn in over it.
  */
 const BEATS = STRUCTURE_ACT.beats;
-/** The i-th badge of a sequence: its beat in focus. */
-const focusOf = (group: 'understand' | 'foundations', i: number): [number, number] => BEATS[`${group}-${i}`];
+/**
+ * The i-th badge of a sequence in focus: from its own beat (the ride slowed for it) until the
+ * next badge comes, its hologram staying in view while the ride picks up between them; the
+ * last until its group goes.
+ */
+const focusOf = (group: 'understand' | 'foundations', i: number): [number, number] => {
+  const next = BEATS[`${group}-${i + 1}`];
+  return [BEATS[`${group}-${i}`][0], next ? next[0] : BEATS[`${group}Out`][0]];
+};
 /** Where a sequence's badges go, together (its last beat). */
 const groupOut = (group: 'understand' | 'foundations') => BEATS[`${group}Out`];
 /** How far ahead of where it comes in a badge's point stands, and how far its card is drawn in over the path. */
 const BADGE_AHEAD = 10;
 const BADGE_CENTRING = 0.5;
+/** On the summit, how high over the top the action badges stand: above the keys' ring, with their holograms over them. */
+const SUMMIT_BADGE_LIFT = 5.4;
 /** How long a hologram takes to fold away (seconds). */
 const HOLO_FOLD = 0.5;
 
@@ -364,7 +380,10 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   const north = groundNode(worldX, fieldZ.sub(READ));
   const south = groundNode(worldX, fieldZ.add(READ));
   const groundNormal = vec3(west.sub(east).div(2 * READ), 1, north.sub(south).div(2 * READ)).normalize();
-  const groundTone = topoTone(groundNormal, clamp(groundHeight.mul(4).sub(east).sub(west).sub(north).sub(south).mul(0.6), -1, 1));
+  // Its contrast is marked from the climb on: the shore and the mountain seen from the
+  // boat stay as they were.
+  const reliefContrast = uniform(0);
+  const groundTone = topoTone(groundNormal, clamp(groundHeight.mul(4).sub(east).sub(west).sub(north).sub(south).mul(mix(float(0.6), float(0.95), reliefContrast)), -1, 1), undefined, reliefContrast);
   fieldMaterial.positionNode = vec3(worldX, swell.mul(float(1).sub(beach)).mul(float(1).sub(underwater)).add(groundHeight).add(beaconNear.mul(0.22)).add(beaconRing.mul(0.3)).add(forming.mul(0.12)), fieldZ);
   // Far: lost in the haze. Near: thinned out so the ground does not crowd the camera.
   const haze = smoothstep(FIELD_DEPTH - FIELD_BEHIND, (FIELD_DEPTH - FIELD_BEHIND) * 0.45, ahead);
@@ -400,7 +419,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     .mul(float(1).sub(paved.mul(0.45))).mul(float(1).sub(underwater).add(seabed.mul(0.32)))
     .div(blur.mul(2.2).add(1))));
   fieldMaterial.scaleNode = float(0.045).add(fieldSeed.pow(5).mul(0.08)).mul(scan.mul(1.3).add(1)).mul(SPRITE_GROWTH)
-    .mul(blur.mul(1.5).add(1));
+    .mul(blur.mul(1.5).add(1)).mul(mix(groundTone.size, float(1), lane));
   const field = new THREE.Sprite(fieldMaterial);
   field.count = count;
   field.frustumCulled = false;
@@ -427,6 +446,8 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     .mul(smoothstep(0, 0.25, uv().x)).mul(smoothstep(1, 0.75, uv().x))
     .mul(horizonShown).mul(horizonCalm);
   const horizon = new THREE.Mesh(new THREE.PlaneGeometry(260, 24), horizonMaterial);
+  // Before the mountain's unseen ground (relief.ts), which never hides it.
+  horizon.renderOrder = -4;
   scene.add(horizon);
 
   // Soft additive light, for the beacons, levers and ring.
@@ -520,9 +541,9 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   // ---- Each note on the way is shown in the scene as well, as it comes in (notes.ts):
   // « Clarifier les fondations »: the path just structured is paved, from there up to
   // « Performer », ahead of the visitor (pavement.ts): the same matter, consolidated.
-  // It starts once « Clarifier les fondations. » has been read (timeline.ts), a little ahead
-  // of the guide, and runs on ahead.
-  const pavingAt = BEATS.paving[0];
+  // It sets off as « Clarifier les fondations. » comes in, its first pavers formed half a
+  // second later (timeline.ts, pavement.ts), a little ahead of the guide, and runs on ahead.
+  const pavingAt = PAVING_AT;
   const pavement = createPavement(scene, {
     startAt: pavingAt,
     from: pavingAt + 4,
@@ -570,6 +591,8 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     /** Its hologram (ui/holograms.ts), and the stretch of the ride over which it is the badge in focus. */
     illustration?: Illustration;
     focus?: [number, number];
+    /** On the summit, where the ride has stopped: the seconds after the stop over which it is in focus. */
+    focusAfterStop?: [number, number];
     /** Whether a line of light rises from its point to it (projection.ts); badges only. */
     projected?: boolean;
   }
@@ -644,54 +667,68 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       confirmAt: lever.at - THROW_TO,
     });
   });
-  // « Mesurer pour décider »: on the monitor, the indicators set first (on its target
-  // line), then the evolution followed, then what to strengthen.
-  // The method chart (monitor.ts) names its pillars as they draw in, then each step as the
-  // curve reaches it: its numeral, as on the site, and its name. On a phone, the steps
-  // already passed keep their numeral only, so only the step being drawn is spelled out.
+  // « Mesurer pour décider », on the summit (timeline.ts, ENDING): the method chart (monitor.ts)
+  // names its pillars as they draw in, then each step as the curve reaches it: its numeral,
+  // as on the site, and its name. On a phone, the steps already passed keep their numeral
+  // only, so only the step being drawn is spelled out. All on the summit's clock.
+  /** Shown on the summit from `appear` (seconds after the stop) until the chart goes. */
+  const onSummit = (appear: number) => (_d: number, s: number | null) =>
+    (s === null ? 0 : smooth(s, appear, appear + 0.4) * (1 - smooth(s, CHART.gone[0] - 0.1, CHART.gone[0] + 0.3)));
   PILLARS.forEach((caption, i) => {
     tags.push({
       id: `pillar-${i}`, kind: 'pillar', icons: [], caption, ground: () => monitor.pillarEnd(i), lift: 0, pull: 0,
-      strength: (d, s) => onRide(CHART.build[0] + 0.8 + i * 0.5, CHART.gone[0] - 0.3)(d, s) * monitor.labelsShown,
+      strength: (d, s) => onSummit(CHART.build[0] + 0.5 + i * 0.25)(d, s) * monitor.labelsShown,
     });
   });
   STEPS.forEach((step, i) => {
     tags.push({
       id: `step-${i}`, kind: 'step', numeral: step.numeral, icons: [], caption: step.name,
       ground: () => monitor.stepPoint(i), lift: 0.42, pull: 0,
-      strength: (d, s) => onRide(monitor.distanceAt(stepAt(i)) - 0.2, CHART.gone[0] - 0.3)(d, s) * monitor.labelsShown,
-      quiet: (d) => narrowView && i < STEPS.length - 1 && d > monitor.distanceAt(stepAt(i + 1)) - 0.2,
+      strength: (d, s) => onSummit(monitor.timeAt(stepAt(i)) - 0.1)(d, s) * monitor.labelsShown,
+      quiet: () => narrowView && i < STEPS.length - 1 && endedAt !== null && elapsed - endedAt > monitor.timeAt(stepAt(i + 1)) - 0.1,
     });
   });
-  /** Where the i-th action badge stands on the summit, ahead of the camera. */
+  /** Where the i-th action's arc rises from on the summit, on the ground ahead of the camera. */
   const summitBadgeGround = (i: number) => {
     const p = distance + 16;
-    const x = centerX(p) + (i - 1) * 6;
+    // On a portrait phone closer together, so all three stay in the narrow view when linked.
+    const x = centerX(p) + (i - 1) * (narrowView ? 3.4 : 6);
     return new THREE.Vector3(x, groundAt(x, -p), -p);
   };
+  /** Where its badge stands: over that point, measured from the top where the ride stopped (the ground falls away beyond it). */
+  const summitBadgeAnchor = (i: number) => summitBadgeGround(i).setY(heightAt(distance));
   /** When the i-th action badge has come in (seconds after the stop): once its note has been read (timeline.ts). */
   const summitBadgeAt = (i: number) => ENDING.badges[i];
-  // On the summit, still facing ahead, with « Chaque résultat relié à une action »: each
-  // badge an action and what it produces, as the site's « Activer » puts it (« de la
-  // visibilité gagnée… », « une acquisition… », « une base client en propre »), standing
-  // in a row over the top, one after the other.
-  // Their hologram is their key: an arc rises from each to a key of light, which bears its
-  // result (summit.ts); no other drawing beside them.
+  // On the summit, still facing ahead, after « Mesurer pour décider » (timeline.ts, ENDING):
+  // each badge an action and what it produces, as the site's « Activer » puts it (« de la
+  // visibilité gagnée… », « une acquisition… », « une base client en propre »), standing in a
+  // row over the top. They come one at a time, each with its own hologram in focus until the
+  // next comes (ui/holograms.ts): content made visible (« reach »), campaigns that bring new
+  // customers (« acquire »), a customer base the brand now owns (« owned »). Then a thread
+  // links them, and each gives its key (summit.ts). Standing high, over where the keys form,
+  // their holograms never cover the keys.
   ([
-    [['camera', 'arrow', 'eye'], 'Contenu → Visibilité'],
-    [['google', 'meta', 'arrow', 'trend'], 'Campagnes Ads → Acquisition'],
-    [['mail', 'arrow', 'users'], 'CRM → Base client'],
-  ] as [IconName[], string][]).forEach(([icons, caption], i) => {
+    [['camera', 'arrow', 'eye'], 'Contenu → Visibilité', 'reach'],
+    [['google', 'meta', 'arrow', 'trend'], 'Campagnes Ads → Acquisition', 'acquire'],
+    [['mail', 'arrow', 'users'], 'CRM → Base client', 'owned'],
+  ] as [IconName[], string, Illustration][]).forEach(([icons, caption, illustration], i) => {
     tags.push({
-      id: `summit-${i}`, icons, caption,
-      ground: () => summitBadgeGround(i),
-      lift: 2.2,
+      id: `summit-${i}`, icons, caption, illustration, focusAfterStop: ENDING.holos[i],
+      ground: () => summitBadgeAnchor(i),
+      lift: SUMMIT_BADGE_LIFT,
+      // On a portrait phone there is room for one at a time with its hologram: each steps out as
+      // the next comes, and all three come back, as their marks alone, to be linked.
       strength: (_d, s) => (s === null ? 0
-        : smooth(s, summitBadgeAt(i) - 0.25, summitBadgeAt(i) + 0.25) * (1 - smooth(s, ACTIONS[1] - 0.5, ACTIONS[1]))),
+        : smooth(s, summitBadgeAt(i) - 0.25, summitBadgeAt(i) + 0.25) * (1 - smooth(s, ACTIONS[1] - 0.5, ACTIONS[1]))
+          * (narrowView && i < 2
+            ? Math.min(1, 1 - smooth(s, ENDING.holos[i][1] - 0.3, ENDING.holos[i][1] + 0.2) + smooth(s, ENDING.link[0] - 0.4, ENDING.link[0]))
+            : 1)),
+      quiet: () => narrowView && endedAt !== null && elapsed - endedAt > ENDING.link[0] - 0.4,
     });
   });
-  // The arrival's wave and column, and the arcs from each action badge to the result (summit.ts).
-  const summit = createSummit(scene, { badgesAt: [0, 1, 2].map(summitBadgeAt) });
+  // The arrival's wave and column, and the arcs from each action's place to its key, with the
+  // summit's note (summit.ts, timeline.ts ENDING).
+  const summit = createSummit(scene, { keysAt: ENDING.keys, gatherAt: ENDING.gather, linkAt: ENDING.link });
   // The summit's crown (crown.ts): it stands where the key ring will hang, just beyond the
   // top, and rises as the visitor climbs the last stretch.
   const crown = createCrown(scene, { time });
@@ -795,12 +832,20 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   const relief = createRelief(scene, Math.round(fieldCount * 1.2));
   // The sea all round the mountain, the boat, the islands out to sea (sea.ts, boat.ts, islands.ts).
   const sea = createSea(scene, { time, near: Math.round(fieldCount * 0.36), far: Math.round(fieldCount * 0.95) });
+  // The boat's trail on the water, from where it really went (wake.ts).
+  const wake = createWake(scene, {
+    time, arm: fieldCount >= 90000 ? 16 : 10, wash: fieldCount >= 90000 ? 8 : 5, foam: fieldCount >= 90000 ? 64 : 40,
+  });
   const boat = createBoat(scene);
   const pier = createPier(scene);
   const islands = createIslands(scene, { time, count: Math.round(fieldCount * 1.1) });
   const boatEye = new THREE.Vector3();
   let boatX = 0;
   let boatHeading = 0;
+  /** The boat's speed over the water (units a second), measured frame to frame, for its wake. */
+  let boatSpeed = 0;
+  let lastBoatAt: number | null = null;
+  let lastBoatTime = 0;
   const reward = createReward(scene);
   const steering = createSteering(surface, LATERAL_LIMIT);
   const look = new THREE.Vector3();
@@ -887,6 +932,10 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   function crossSea() {
     const at = distance - CAMERA_BACK + SEA.eyeBehind; // the boat's middle, if it still carried the eye
     const boatAt = mooring(at);
+    const sinceLast = elapsed - lastBoatTime;
+    if (lastBoatAt !== null && sinceLast > 0) boatSpeed = THREE.MathUtils.damp(boatSpeed, Math.abs(boatAt - lastBoatAt) / sinceLast, 3, sinceLast);
+    lastBoatAt = boatAt;
+    lastBoatTime = elapsed;
     // Moored: it hardly rocks any more, and leaves no wake.
     const moored = smooth(at, PIER.moor - 1.2, PIER.moor + 2.2);
     const aboard = 1 - smooth(at, PIER.moor + SEA.stepOff[0], PIER.moor + SEA.stepOff[1]);
@@ -920,7 +969,9 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       let backYaw = Math.atan2(lookDir.x, -lookDir.z);
       // Turning by the right: past the coast and the Parata, to the mountain.
       if (backYaw > 0) backYaw -= Math.PI * 2;
-      const e = back * back * (3 - 2 * back);
+      // Eased once, over the whole turn (`back` already is): a steady, unhurried pan rather
+      // than a swing bunched in its middle.
+      const e = back;
       const yaw = THREE.MathUtils.lerp(aheadYaw, backYaw, e);
       const pitch = THREE.MathUtils.lerp(aheadPitch, 0.01, e);
       look.copy(camera.position).add(lookDir.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(20));
@@ -930,12 +981,23 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       shown: endedAt === null ? onWater : relief.shownAmount,
       near: endedAt === null ? onWater : 0,
       camera: camera.position,
-      boat: { x: boatX, z: -boatAt, heading: boatHeading, speed: 1 - moored },
+      // Its wake follows its real speed: barely there as it sets off slowly, full on the crossing.
+      boat: { x: boatX, z: -boatAt, heading: boatHeading, speed: (0.5 + 0.5 * Math.min(1, boatSpeed / 4.5)) * (1 - moored) },
+    });
+    // Its trail, from where it went and as fast as it went; under way already as the visitor
+    // comes aboard (at the ride's own pace there).
+    wake.update({
+      shown: endedAt === null ? onWater : 0,
+      boat: { x: boatX, z: -boatAt, heading: boatHeading, speed: boatSpeed * (1 - moored) },
+      now: elapsed,
+      underWay: SPEED * paceAt(distance),
     });
     if (endedAt === null) {
       sea.setView({ level: SEA_LEVEL, swell: 1, glints: 1 });
       islands.update(onWater);
-      relief.setCrossing(onWater, distance);
+      // The mountain stays round the path the whole way up, from the boat to the summit: the
+      // ride's own field draws the band along the path, the mountain all the rest.
+      relief.setCrossing(1, distance, reliefContrast.value);
     }
   }
 
@@ -950,7 +1012,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     if (endedAt === null && distance >= END_AT) startReward();
     // The pace of the moment (pace.ts): lively between sequences, slow where there is to see and read.
     const cruise = endedAt === null ? SPEED * paceAt(distance) : 0;
-    speed = THREE.MathUtils.damp(speed, cruise, endedAt === null ? 1.2 : 2.5, dt);
+    speed = THREE.MathUtils.damp(speed, cruise, endedAt === null ? responseAt(distance) : 2.5, dt);
     distance += speed * dt;
     travel.value = distance;
     time.value = elapsed;
@@ -998,7 +1060,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     network.update(distance, lookingBack);
     pavement.update(distance);
     paveFront.value = pavement.front;
-    monitor.update(distance, narrow);
+    monitor.update(endedAt === null ? null : elapsed - endedAt, distance, narrow);
     // The ground sweep while « Comprendre avant de proposer » shows, faded in and out with it.
     // After the note and its badges have come in.
     // Once « Comprendre avant de proposer. » has been read, through its badges (timeline.ts).
@@ -1040,6 +1102,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     horizonCalm.value = (narrow ? 0.45 : 1) * (1 - 0.55 * smooth(distance, CROWN_BUILD[0], CROWN_BUILD[1]))
       * smooth(distance, 10, 30);
     bandSharpness.value = narrow ? 15 : 9;
+    reliefContrast.value = smooth(distance, 10, 30);
     rise.value = smooth(distance, PERFORM_AT - 4, PERFORM_AT + 22);
 
     // One word at a time, over a stretch of path around its landmark.
@@ -1125,7 +1188,6 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
         const share = Math.min(0.85, glance.levers * (narrow ? 1.6 : 1));
         if (total > 1e-4) look.lerp(focus.divideScalar(total).setY(focus.y + 0.9), share * motion);
       }
-      if (glance.chart > 0) look.lerp(monitor.centre(), Math.min(0.9, glance.chart * (narrow ? 2.2 : 1)) * motion);
       // The badge in focus (« Comprendre », the foundations): the eyes turn a little to it,
       // easing in and out with its time in focus.
       for (const tag of tags) {
@@ -1140,20 +1202,23 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     }
     // The focus follows the eyes: on the guide, then pulled to what they turn to.
     const onGuide = camera.position.distanceTo(guide.position);
-    const pulled = glance ? Math.min(1, (glance.levers + glance.chart) * 1.8) : 0;
+    const pulled = glance ? Math.min(1, glance.levers * 1.8) : 0;
     const focusTarget = THREE.MathUtils.lerp(onGuide, camera.position.distanceTo(look), pulled);
     focusDistance.value = THREE.MathUtils.damp(focusDistance.value, focusTarget, 3, dt);
     focusAmount.value = THREE.MathUtils.damp(focusAmount.value, endedAt === null ? 1 : 0, 1.5, dt);
     if (endedAt !== null) playEnding(elapsed - endedAt);
     camera.lookAt(look);
-    if (endedAt !== null && elapsed - endedAt < ACTIONS[0]) {
+    if (endedAt !== null && elapsed - endedAt < ENDING.keys[0]) {
       // Laid out where the ride came to rest (it glides a little after the stop).
       // Where the crown stands (crown.ts): the key ring hangs at its apex.
       summitTop.set(centerX(CROWN_AT), groundAt(centerX(CROWN_AT), -CROWN_AT) + CROWN_TOP, -CROWN_AT);
       summitHere.set(centerX(distance), heightAt(distance), -distance);
-      summit.place(summitHere, [0, 1, 2].map(summitBadgeGround), summitTop);
+      // On a portrait phone the keys' row is drawn closer together, so the outer ones stay in view.
+      // Each key's arc sets off from its action's badge (where its card stands).
+      summit.place(summitHere, [0, 1, 2].map((i) => summitBadgeAnchor(i).setY(heightAt(distance) + SUMMIT_BADGE_LIFT)), summitTop, narrowView ? 2.5 : 4);
     }
-    summit.update(endedAt === null ? null : elapsed - endedAt, camera, ENDING.note[0], {
+    // The arrival's column thins to a thread before the summit's first note.
+    summit.update(endedAt === null ? null : elapsed - endedAt, camera, ENDING.measure.note[0], {
       hand: RING_IN_HAND, sway: RING_SWAY, lower: RING_LOWERED,
     });
     placeNote();
@@ -1191,8 +1256,10 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       // On a phone, a badge already passed goes as the camera comes up to it, rather than
       // sliding off the bottom of the narrow screen.
       if (narrowView && tag.focus) opacity *= smooth(-tagDepth.z, ...(tag.near ?? [4.5, 7]));
-      if (tag.illustration && tag.focus) {
-        const inFocus = distance >= tag.focus[0] && distance < tag.focus[1];
+      const focusNow = tag.focus ? distance : sinceStop;
+      const focusSpan = tag.focus ?? tag.focusAfterStop;
+      if (tag.illustration && focusSpan && focusNow !== null) {
+        const inFocus = focusNow >= focusSpan[0] && focusNow < focusSpan[1];
         if (inFocus && !focusSince.has(tag.id)) focusSince.set(tag.id, elapsed);
         if (inFocus) focusLeft.delete(tag.id);
         if (!inFocus && focusSince.has(tag.id) && !focusLeft.has(tag.id)) focusLeft.set(tag.id, elapsed);
@@ -1255,7 +1322,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     if (at === null) {
       // On the summit: over the start, far below, as it is when looking back.
       // On the summit, before the turn: over the top, ahead of the camera.
-      noteAnchor.set(centerX(distance + 18), heightAt(distance) + SUMMIT_EYE + 3.2, -distance - 18);
+      noteAnchor.set(centerX(distance + 18), heightAt(distance) + SUMMIT_EYE + (note.over ?? 3.2), -distance - 18);
     } else {
       noteAnchor.set(centerX(at) + side * NOTE_BESIDE, heightAt(at) + (side === 0 ? NOTE_OVER : NOTE_HEIGHT), -at);
     }
@@ -1309,14 +1376,25 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     const reliefIn = smooth(since, RELIEF_IN[0], RELIEF_IN[1]);
     fieldShown.value = 1 - smooth(since, FIELD_OUT[0], FIELD_OUT[1]);
     horizonShown.value = 1 - smooth(since, FRONT_HORIZON_OUT[0], FRONT_HORIZON_OUT[1]);
-    relief.setShown(reliefIn);
+    // The mountain as ridden, then the whole of it from the top: never out in between.
+    relief.setFromTop(reliefIn, distance);
     relief.setDepth(1 + (DEPTH - 1) * smooth(since, DEEPEN[0], DEEPEN[1]));
     // The sea at the mountain's foot and the islands on the horizon, deepened with it: the
     // same sea, the same islands as from the boat, from the top. They step back a little as
     // the eyes rise to the curve.
     const seaLevel = relief.deepen(SEA_LEVEL);
     sea.setView({ level: seaLevel, swell: 1 + 1.5 * smooth(since, DEEPEN[0], DEEPEN[1]), glints: 1 - up * 0.5 });
-    islands.update(reliefIn * (1 - up * 0.45), seaLevel);
+    // For the closing view the sea reaches less far out, its horizon (and the last light on it)
+    // nearer: lower on the screen, so the sky over it holds the closing curve, its words and
+    // its choices (reward.ts). It comes in as the ground deepens, while the eyes are down on
+    // the climb. The sea itself stays whole, as dense as it was.
+    const nearer = smooth(since, DEEPEN[0], DEEPEN[1]);
+    const closingReach = narrowView ? CLOSING_REACH.narrow : CLOSING_REACH.wide;
+    sea.setReach(THREE.MathUtils.lerp(2000, closingReach, nearer));
+    islands.setHorizon(THREE.MathUtils.lerp(1350, closingReach * 1.02, nearer));
+    // On a portrait phone the closing curve and its choices take the middle of the narrow
+    // view: the islands, at its edge, step further back as the eyes rise to it.
+    islands.update(reliefIn * (1 - up * (narrowView ? 0.8 : 0.45)), seaLevel, true);
     pier.update(reliefIn * (1 - up * 0.45), 0.4, seaLevel);
     relief.faceStart(camera);
     // The landmarks down the slope go down with it.
@@ -1405,7 +1483,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       const onScreen = (v: THREE.Vector3) => (v.project(camera).x + 1) / 2;
       const guideX = onScreen(guide.position.clone());
       const centreX = onScreen(new THREE.Vector3(centerX(distance), guide.position.y, -distance));
-      return { distance, ending: endedAt === null ? null : elapsed - endedAt, lateral, guideX, centreX };
+      return { distance, ending: endedAt === null ? null : elapsed - endedAt, lateral, guideX, centreX, pavingAt: PAVING_AT, pavingFormsAt: PAVING_AT + FIRST_FORMS, speed };
     },
     /** Development only: the scene and camera, for tests that look at one element alone. */
     debugScene() {
@@ -1431,6 +1509,11 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       reward.reset();
       boatX = 0;
       boatHeading = 0;
+      boatSpeed = 0;
+      lastBoatAt = null;
+      wake.reset();
+      sea.setReach(1e6);
+      islands.setHorizon(1350);
       steer = 0;
       camera.fov = FOV;
       camera.updateProjectionMatrix();
@@ -1459,6 +1542,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       projections.dispose();
       crown.dispose();
       sea.dispose();
+      wake.dispose();
       boat.dispose();
       pier.dispose();
       islands.dispose();

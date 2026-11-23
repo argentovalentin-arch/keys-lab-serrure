@@ -24,7 +24,7 @@
 
 export type Illustration =
   | 'scan' | 'block' | 'flow' | 'target' | 'priorities' | 'journey' | 'roadmap'
-  | 'content' | 'social' | 'influence' | 'funnel' | 'loop';
+  | 'content' | 'social' | 'influence' | 'funnel' | 'loop' | 'reach' | 'acquire' | 'owned';
 
 /** Logical size of a hologram (CSS pixels on a computer; smaller on a phone, same drawing). */
 export const HOLO = { width: 260, height: 172 };
@@ -33,7 +33,7 @@ export const HOLO_DELAY = 0.6;
 /** How long each diagram takes to build: the more it has to say, the longer. */
 export const HOLO_BUILD: Record<Illustration, number> = {
   scan: 1.6, block: 1.4, flow: 1.3, target: 1.5, priorities: 1.7, journey: 1.5, roadmap: 1.6,
-  content: 1.4, social: 1.5, influence: 1.4, funnel: 1.4, loop: 1.4,
+  content: 1.4, social: 1.5, influence: 1.4, funnel: 1.4, loop: 1.4, reach: 1.6, acquire: 1.7, owned: 1.7,
 };
 
 const CHAMPAGNE = '233, 215, 180';
@@ -234,7 +234,7 @@ const glyph = {
 };
 
 /** Each diagram: `b` is its build (0..1), `T` a running clock (seconds) for its movement. */
-const DRAWINGS: Record<Illustration, (ctx: CanvasRenderingContext2D, b: number, T: number) => void> = {
+const DRAWINGS: Record<Illustration, (ctx: CanvasRenderingContext2D, b: number, T: number, since: number) => void> = {
   // « Votre situation »: a radar of the business, five dimensions; a sweep goes round reading
   // each; the shape of the situation draws in (strong here, weak there); the reticle settles
   // on the weakest one: where to look first.
@@ -852,6 +852,206 @@ const DRAWINGS: Record<Illustration, (ctx: CanvasRenderingContext2D, b: number, 
       }
     }
   },
+  // « Contenu → Visibilité », on the summit: the brand's content goes out in waves over an
+  // audience; each person a wave reaches lights up and stays lit; the share reached rises
+  // on the gauge beside the eye: content made visible, reach that adds up.
+  reach(ctx, b, T, since) {
+    const source: Pt = [40, 80];
+    const field = { x0: 96, y0: 42, cols: 9, rows: 5, step: 15 };
+    // The content: a small stack of pieces, the front one a video.
+    const stack = phase(b, 0, 0.3);
+    [2, 1, 0].forEach((k) => {
+      pen(ctx, (k === 0 ? 0.95 : 0.45) * stack, k === 0);
+      box(ctx, source[0] - 16 + k * 4, source[1] - 12 - k * 4, 28, 20, stack);
+    });
+    if (stack > 0.6) glyph.play(ctx, source[0] - 2, source[1] - 2, 6);
+    label(ctx, 'CONTENU', source[0], source[1] + 24, stack * 0.9, 'center', true);
+    // The audience: people spread out ahead, unreached until a wave gets to them.
+    const people = phase(b, 0.25, 0.6);
+    // How far the reach has gone: it grows while the hologram is watched.
+    const grown = clamp01((since - 2) / 3.6);
+    const reachNow = 30 + grown * 160;
+    let reached = 0;
+    for (let r = 0; r < field.rows; r++) {
+      for (let c = 0; c < field.cols; c++) {
+        const x = field.x0 + c * field.step + (r % 2) * 5;
+        const y = field.y0 + r * field.step + Math.sin(c * 1.7 + r) * 2;
+        const d = Math.hypot(x - source[0], y - source[1]);
+        const lit = b >= 1 && d < reachNow;
+        if (lit) reached++;
+        pen(ctx, (lit ? 0.95 : 0.3) * people, lit);
+        dot(ctx, x, y, lit ? 2.3 : 1.6);
+      }
+    }
+    label(ctx, 'PORTÉE', field.x0 + 62, field.y0 - 16, people * 0.85);
+    // The waves: rings going out from the content, one after another.
+    if (b >= 1) {
+      for (let k = 0; k < 2; k++) {
+        const u = fract(T / 1.8 + k / 2);
+        const radius = 14 + u * Math.min(reachNow, 190);
+        pen(ctx, 0.5 * (1 - u), true, 1);
+        ctx.beginPath();
+        ctx.arc(source[0], source[1], radius, -0.75, 0.75);
+        ctx.stroke();
+      }
+    }
+    // The visibility gauge: the share of the audience reached.
+    const gauge = phase(b, 0.55, 0.85);
+    const share = reached / (field.cols * field.rows);
+    pen(ctx, 0.85 * gauge, true);
+    glyph.eye(ctx, 236, 34, 9);
+    pen(ctx, 0.5 * gauge);
+    box(ctx, 230, 50, 12, 76, gauge);
+    for (let i = 0; i < 8; i++) {
+      const on = (i + 0.5) / 8 < share;
+      pen(ctx, (on ? 0.95 : 0.15) * gauge, on);
+      square(ctx, 236, 120 - i * 9.4, 6, on);
+    }
+    label(ctx, 'VISIBILITÉ', 236, 140, gauge * 0.9, 'center', true);
+  },
+  // « Campagnes Ads → Acquisition », on the summit: the campaigns aim at the right people in
+  // a crowd; those who match are singled out, come across and become new customers; their
+  // number climbs on a small curve: acquisition, customer after customer.
+  acquire(ctx, b, T, since) {
+    const aim: Pt = [40, 74];
+    // The campaigns: a sight, aimed.
+    const sight = phase(b, 0, 0.3);
+    pen(ctx, 0.9 * sight, true);
+    ring(ctx, aim[0], aim[1], 15, sight);
+    ring(ctx, aim[0], aim[1], 7, sight);
+    line(ctx, [aim[0] - 21, aim[1]], [aim[0] - 10, aim[1]], sight);
+    line(ctx, [aim[0] + 10, aim[1]], [aim[0] + 21, aim[1]], sight);
+    line(ctx, [aim[0], aim[1] - 21], [aim[0], aim[1] - 10], sight);
+    line(ctx, [aim[0], aim[1] + 10], [aim[0], aim[1] + 21], sight);
+    label(ctx, 'CAMPAGNES', aim[0], aim[1] + 32, sight * 0.9, 'center', true);
+    // The crowd: those who match the campaign's aim are ringed.
+    const crowd = phase(b, 0.2, 0.55);
+    const people: Pt[] = Array.from({ length: 21 }, (_, k): Pt => [86 + (k % 7) * 13 + ((k * 7) % 3) * 2, 40 + Math.floor(k / 7) * 26 + ((k * 5) % 4) * 2]);
+    const matches = [2, 6, 9, 13, 17, 19];
+    // How many have become customers: it grows while the hologram is watched.
+    const won = b >= 1 ? Math.min(matches.length, Math.floor(clamp01((since - 2.1) / 3.4) * (matches.length + 0.99))) : 0;
+    people.forEach(([x, y], k) => {
+      const m = matches.indexOf(k);
+      const target = m >= 0;
+      const gone = target && m < won;
+      if (gone) return;
+      pen(ctx, (target ? 0.85 : 0.3) * crowd, target);
+      dot(ctx, x, y, target ? 2.2 : 1.6);
+      if (target && b >= 0.7) {
+        pen(ctx, 0.55 * phase(b, 0.6, 0.9), true, 1);
+        ring(ctx, x, y, 5);
+      }
+    });
+    label(ctx, 'CIBLE', 125, 26, crowd * 0.85);
+    // The one being won now, travelling across to the customers.
+    if (b >= 1 && won < matches.length) {
+      const u = fract(T / 1.1);
+      const [x, y] = people[matches[won]];
+      pen(ctx, 1, true);
+      dot(ctx, x + (188 - x) * u, y + (118 - y) * u, 2.4);
+    }
+    // The new customers, kept, and the curve of their number.
+    const chart = phase(b, 0.5, 0.85);
+    pen(ctx, 0.5 * chart);
+    line(ctx, [186, 128], [250, 128], chart);
+    line(ctx, [186, 128], [186, 40], chart);
+    const pts: Pt[] = [];
+    for (let k = 0; k <= won; k++) pts.push([186 + (k / matches.length) * 62, 126 - (k / matches.length) ** 1.15 * 80]);
+    if (pts.length > 1) {
+      pen(ctx, 0.95 * chart, true, 1.6);
+      polyline(ctx, pts);
+      arrow(ctx, pts[pts.length - 1], -0.9, 5);
+    }
+    for (let k = 0; k < won; k++) {
+      pen(ctx, 0.9 * chart, true);
+      glyph.person(ctx, 194 + k * 9.5, 142, 4);
+    }
+    label(ctx, 'ACQUISITION', 218, 30, chart * 0.9, 'center', true);
+  },
+  // « CRM → Base client », on the summit: what the climb leaves the brand with. On the left,
+  // the audiences the brand reaches through others (content, ads, social: rented, drawn
+  // dashed); the CRM in the middle; on the right, its own customer base, a store of records.
+  // People reached come through the CRM and become records in the base, row after row: an
+  // asset that stays the brand's, marked with its key.
+  owned(ctx, b, T, since) {
+    const sources: [number, keyof typeof glyph][] = [[34, 'play'], [76, 'eye'], [118, 'person']];
+    const crm: Pt = [118, 76];
+    const base = { cx: 200, top: 36, bottom: 112, rx: 34, ry: 8 };
+    // The rented audiences: dashed rings, their names.
+    sources.forEach(([y, g], k) => {
+      const shown = phase(b, k * 0.08, 0.28 + k * 0.08);
+      pen(ctx, 0.55 * shown);
+      ctx.setLineDash([2, 3]);
+      ring(ctx, 30, y, 12, shown);
+      ctx.setLineDash([]);
+      if (shown > 0.5) glyph[g](ctx, 30, y, 6);
+      // Towards the CRM.
+      const link = phase(b, 0.22 + k * 0.06, 0.45 + k * 0.06);
+      pen(ctx, 0.3 * link, false, 1);
+      line(ctx, [43, y], [crm[0] - 15, crm[1] + (y - 76) * 0.25], link);
+    });
+    label(ctx, 'AUDIENCES', 30, 142, phase(b, 0.55, 0.85) * 0.85);
+    // The CRM: the brand's square, a letter in it.
+    const gate = phase(b, 0.3, 0.55);
+    pen(ctx, 0.95 * gate, true);
+    square(ctx, crm[0], crm[1], 26, false);
+    if (gate > 0.5) glyph.mail(ctx, crm[0], crm[1], 6.5);
+    label(ctx, 'CRM', crm[0], crm[1] + 22, gate * 0.9, 'center', true);
+    const into = phase(b, 0.45, 0.62);
+    pen(ctx, 0.5 * into, true, 1);
+    line(ctx, [crm[0] + 14, crm[1]], [base.cx - base.rx - 4, crm[1]], into);
+    if (into > 0.95) arrow(ctx, [base.cx - base.rx - 4, crm[1]], 0, 4);
+    // The base: a store of records, drawn as a cylinder.
+    const store = phase(b, 0.5, 0.8);
+    pen(ctx, 0.9 * store, true);
+    ellipse(ctx, base.cx, base.top, base.rx, base.ry, store);
+    line(ctx, [base.cx - base.rx, base.top], [base.cx - base.rx, base.bottom], store);
+    line(ctx, [base.cx + base.rx, base.top], [base.cx + base.rx, base.bottom], store);
+    if (store > 0.5) {
+      ctx.beginPath();
+      ctx.ellipse(base.cx, base.bottom, base.rx, base.ry, 0, 0, Math.PI);
+      ctx.stroke();
+    }
+    // Its records, row after row from the bottom: as many as have come through since the
+    // drawing was built; the base fills while it is looked at.
+    const cols = 6;
+    const rows = 6;
+    const filled = Math.floor(store * 4 + clamp01((since - 2.2) / 4.5) * (cols * rows - 4));
+    for (let i = 0; i < cols * rows; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = base.cx - 22.5 + col * 9;
+      const y = base.bottom - 8 - row * 11;
+      const kept = i < filled;
+      const fresh = kept && i === filled - 1;
+      pen(ctx, (kept ? (fresh ? 1 : 0.75) : 0.16) * store, kept);
+      square(ctx, x, y, 5, kept);
+    }
+    // Its owner's mark: the key's « k. » on the store.
+    const mark = phase(b, 0.75, 0.95);
+    numeral(ctx, 'k.', base.cx, base.top, mark);
+    label(ctx, 'BASE CLIENT', base.cx, 132, phase(b, 0.7, 0.95) * 0.95, 'center', true);
+    label(ctx, 'EN PROPRE', base.cx, 143, phase(b, 0.78, 1) * 0.8);
+    // People reached travelling: from an audience, through the CRM, into the base.
+    if (b >= 1) {
+      for (let j = 0; j < 3; j++) {
+        const u = fract(T / 2.4 + j / 3);
+        const [y] = sources[j];
+        let p: Pt;
+        if (u < 0.45) {
+          const v = u / 0.45;
+          p = [43 + (crm[0] - 15 - 43) * v, y + (crm[1] + (y - 76) * 0.25 - y) * v];
+        } else if (u < 0.55) {
+          p = crm;
+        } else {
+          const v = (u - 0.55) / 0.45;
+          p = [crm[0] + 14 + (base.cx - base.rx - 4 - crm[0] - 14) * v, crm[1]];
+        }
+        pen(ctx, u > 0.45 && u < 0.55 ? 1 : 0.85, true);
+        dot(ctx, p[0], p[1], 2.2);
+      }
+    }
+  },
 };
 
 /**
@@ -866,6 +1066,6 @@ export function drawHologram(ctx: CanvasRenderingContext2D, kind: Illustration, 
   ctx.setTransform(pixelRatio * scale, 0, 0, pixelRatio * scale, 0, 0);
   base(ctx, local);
   const build = clamp01((local - 0.25) / HOLO_BUILD[kind]);
-  if (build > 0) DRAWINGS[kind](ctx, build, T);
+  if (build > 0) DRAWINGS[kind](ctx, build, T, local);
   ctx.shadowBlur = 0;
 }

@@ -430,9 +430,23 @@ function layGround(): THREE.BufferGeometry[] {
   });
 }
 
+/**
+ * Seen from the summit at the end, the archipelago is drawn in nearer, lower in the view and
+ * a little to the right, off the mountain's foot below the path: it sits with the land just
+ * climbed rather than floating in the middle of the view, behind the closing curve. Only its
+ * place changes, by this much (world units), never its shape; from the boat it stands where
+ * it does.
+ */
+const SUMMIT_PLACE = new THREE.Vector3(-168, 0, -345);
+
 export function createIslands(scene: THREE.Scene, { time, count }: { time: THREE.Node<'float'>; count: number }) {
   const group = new THREE.Group();
+  /** The islands themselves (not the last light behind them): what is placed for the summit's view. */
+  const land = new THREE.Group();
+  group.add(land);
   const shown = uniform(0);
+  /** Their topography marked more strongly from the summit (topography.ts); from the boat, as it is. */
+  const contrast = uniform(0);
 
   // ---- The ground, in points (topography.ts).
   const started = performance.now();
@@ -447,7 +461,7 @@ export function createIslands(scene: THREE.Scene, { time, count }: { time: THREE
   const seed = hash(instanceIndex.add(uint(7)));
   const toEye = cameraPosition.sub(place.xyz).normalize();
   const fromEye = cameraPosition.sub(place.xyz).length();
-  const tone = topoTone(ground.xyz, ground.w, toEye);
+  const tone = topoTone(ground.xyz, ground.w, toEye, contrast);
   const isLine = kind.greaterThan(0.5);
   const isWaterline = kind.greaterThan(1.5).and(kind.lessThan(2.5));
   const isBuilt = kind.greaterThan(2.5);
@@ -458,19 +472,22 @@ export function createIslands(scene: THREE.Scene, { time, count }: { time: THREE
   const colour = isWaterline.select(color(LAB.dust).mul(1.05), isBuilt.select(mix(tone.colour, color(BRAND.offwhite), 0.45), tone.colour));
   // Seen from far, against the last light, most of what faces the eye is in shade: it keeps
   // a glow of its own, so the islands read as bodies of light, modelled by the tone.
-  const strength = isWaterline.select(breaking.mul(0.45).add(0.65), isBuilt.select(tone.strength.mul(1.25).add(0.2), tone.strength.mul(0.75).add(0.3).mul(isLine.select(float(1.05), float(0.9)))));
+  const strength = isWaterline.select(breaking.mul(0.45).add(0.65), isBuilt.select(tone.strength.mul(1.25).add(0.2), tone.strength.mul(0.75).add(float(0.3).sub(contrast.mul(0.16))).mul(isLine.select(float(1.05), float(0.9)))));
   const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
   // Drawn a little towards the eye, so the unseen ground they lie on never hides them.
   material.positionNode = place.xyz.add(toEye.mul(0.25));
   const shape = particleShape();
   material.colorNode = varying(mix(colour, color(BRAND.navy60).mul(1.4), haze.mul(0.35)));
-  material.opacityNode = shape.alpha.mul(varying(strength.mul(float(1).sub(haze.mul(0.3))).mul(twinkle(time, seed, 0.18)))).mul(shown);
+  // From the summit they are nearer than from the boat: each point gives less light, so the
+  // tones, not the sheer number of points, draw their relief.
+  const near = mix(float(1), float(0.46), contrast);
+  material.opacityNode = shape.alpha.mul(varying(strength.mul(float(1).sub(haze.mul(0.3))).mul(twinkle(time, seed, 0.18)).mul(near))).mul(shown);
   // As the mountain seen from the sea (relief.ts): the same points, finer from afar.
-  material.scaleNode = topoSize(fromEye, isLine, seed).mul(isBuilt.select(float(0.32), float(0.72)));
+  material.scaleNode = topoSize(fromEye, isLine, seed).mul(isBuilt.select(float(0.32), tone.size.mul(0.72)));
   const points = new THREE.Sprite(material);
   points.count = places.length / 4;
   points.frustumCulled = false;
-  group.add(points);
+  land.add(points);
 
   // ---- The unseen ground: it hides what lies behind an island (its far side, the sea
   // beyond, the next island), never the last light behind them all (drawn before it).
@@ -479,7 +496,7 @@ export function createIslands(scene: THREE.Scene, { time, count }: { time: THREE
   for (const geometry of geometries) {
     const mesh = new THREE.Mesh(geometry, groundMaterial);
     mesh.renderOrder = -2;
-    group.add(mesh);
+    land.add(mesh);
   }
 
   // ---- The light: three white flashes every 15 seconds, as the real one.
@@ -493,7 +510,7 @@ export function createIslands(scene: THREE.Scene, { time, count }: { time: THREE
   const beam = new THREE.Sprite(beamMaterial);
   beam.position.copy(lightAt);
   beam.scale.setScalar(4.5);
-  group.add(beam);
+  land.add(beam);
 
   // ---- The last light of the day, low on the horizon behind them.
   const glowMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
@@ -521,10 +538,16 @@ export function createIslands(scene: THREE.Scene, { time, count }: { time: THREE
 
   return {
     /** 0..1: how much they show; and where the sea's surface is (lower once the summit's view deepens). */
-    update(amount: number, level = SEA_LEVEL) {
+    /** How far out round the mountain the last light's arc stands (world units; it stands at 1350 unless told). */
+    setHorizon(radius: number) {
+      glow.scale.set(radius / 1350, 1, radius / 1350);
+    },
+    update(amount: number, level = SEA_LEVEL, fromSummit = false) {
       shown.value = amount;
       group.visible = amount > 0.001;
       group.position.y = level - SEA_LEVEL;
+      contrast.value = fromSummit ? 1 : 0;
+      land.position.copy(SUMMIT_PLACE).multiplyScalar(fromSummit ? 1 : 0);
     },
     dispose() {
       geometries.forEach((g) => g.dispose());

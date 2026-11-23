@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { ACTIVATE_AT, END_AT, PERFORM_AT, STRUCTURE_AT } from './path';
-import { ACTIVATE_ACT, LEVERS_END, LEVERS_FIRST_IMPULSE, MEASURE_ACT, STRUCTURE_ACT, type Act } from './timeline';
+import { ACTIVATE_ACT, ENDING, LEVERS_END, LEVERS_FIRST_IMPULSE, STRUCTURE_ACT, TEMPO, type Act } from './timeline';
 
 /**
  * The ride's rhythm, in one place: how fast the guide goes where, and where the eyes turn.
@@ -13,8 +13,13 @@ import { ACTIVATE_ACT, LEVERS_END, LEVERS_FIRST_IMPULSE, MEASURE_ACT, STRUCTURE_
  * smoothly, terrain.ts), so they are felt as a change of pace, never as a brake.
  */
 
-/** Cruising speed between sequences, in units of path per second. */
-export const SPEED = 6.4;
+/** Cruising speed between sequences, in units of path per second (a touch livelier at TEMPO, timeline.ts). */
+export const SPEED = 6.4 * TEMPO;
+/**
+ * A pace that keeps its speed as it was set before TEMPO: the titles' stretches, the
+ * levers' run and the arrival on the summit read exactly as they did.
+ */
+const kept = (pace: number) => pace / TEMPO;
 
 interface Zone {
   /** What the slow stretch is for. */
@@ -36,8 +41,11 @@ interface Zone {
  */
 export const SEA = {
   start: -64,
-  /** The eyes on the islands, then turning to the shore: [still on them until, turned by]. */
-  turn: [-58.5, -47] as const,
+  /**
+   * The eyes on the islands, then turning to the shore: [still on them until, turned by].
+   * Long enough to find them, then a turn of about four seconds, eased in and out.
+   */
+  turn: [-61, -50.5] as const,
   /** From here the ride slows for the approach (the boat then some twelve units from its mooring). */
   approach: -20,
   /** The visitor's eye in the boat: this far behind the boat's middle (towards the stern). */
@@ -55,24 +63,67 @@ export const SEA = {
 const actZone = (why: string, act: Act, ease = 3): Zone => ({ why, from: act.from - 2, to: act.to, ease, pace: act.speed / SPEED });
 
 export const ZONES: Zone[] = [
-  { why: 'The sea: the horizon and the islands, behind the boat', from: SEA.start, to: SEA.turn[0], ease: 2.5, pace: 0.09 },
-  { why: 'The eyes turn along the coast to the shore', from: SEA.turn[0], to: SEA.turn[1], ease: 2, pace: 0.3 },
+  { why: 'The sea: the horizon and the islands, behind the boat', from: SEA.start, to: SEA.turn[0], ease: 2, pace: 0.1 },
+  { why: 'The eyes turn along the coast to the shore', from: SEA.turn[0], to: SEA.turn[1], ease: 2, pace: 0.34 },
   { why: 'The crossing', from: SEA.turn[1], to: SEA.approach, ease: 4, pace: 0.72 },
   { why: 'The approach: the boat slows, comes alongside the landing stage, stops, settles', from: SEA.approach, to: SEA.ashore[0], ease: 5, pace: 0.3 },
-  { why: 'Ashore: along the landing stage, onto the beach', from: SEA.ashore[0], to: SEA.ashore[1], ease: 3, pace: 0.36 },
-  { why: 'Structurer: the beacon charges, the wave runs out, the title reads', from: STRUCTURE_AT - 14, to: STRUCTURE_AT + 2, ease: 6, pace: 0.34 },
-  actZone('Comprendre, the ground examined, its badges; Clarifier les fondations, the paving, its badges', STRUCTURE_ACT),
-  { why: 'Activer: the beacon charges, the title reads', from: ACTIVATE_AT - 13, to: ACTIVATE_AT + 2, ease: 6, pace: 0.34 },
+  { why: 'Ashore: along the landing stage, onto the beach, at a walk', from: SEA.ashore[0], to: SEA.ashore[1], ease: 3, pace: 0.7 },
+  { why: 'Structurer: the beacon charges, the wave runs out, the title reads', from: STRUCTURE_AT - 14, to: STRUCTURE_AT + 2, ease: 6, pace: kept(0.34) },
+  { why: 'Activer: the beacon charges, the title reads', from: ACTIVATE_AT - 13, to: ACTIVATE_AT + 2, ease: 6, pace: kept(0.34) },
   actZone('Les bons leviers: the note, then the levers rise', ACTIVATE_ACT),
-  { why: 'The impulse bouncing from lever to lever, each with its badge', from: LEVERS_FIRST_IMPULSE, to: LEVERS_END, ease: 3, pace: 0.22 },
-  actZone('Mesurer pour décider: the note, then the chart drawing itself', MEASURE_ACT),
-  { why: 'Performer: the ring, the title, the arrival', from: PERFORM_AT - 6, to: END_AT, ease: 4, pace: 0.6 },
+  // Slowed from before its title, coming from the open stretch after the levers, so the title
+  // reads as long as it did when the chart stood before it.
+  { why: 'Performer: the ring, the title, the arrival', from: PERFORM_AT - 8, to: END_AT, ease: 8, pace: kept(0.55) },
 ];
 
 const smooth = THREE.MathUtils.smoothstep;
 
 /** 0..1 over [a, b], 1 until c, back to 0 at e: a plateau with eased sides. */
 export const plateau = (d: number, a: number, b: number, c: number, e: number) => smooth(d, a, b) * (1 - smooth(d, c, e));
+
+/**
+ * A stretch of the ride whose speed changes beat by beat: picking up between two badges,
+ * slowing as one comes, slow while it is read, picking up again. From one speed to the next
+ * it eases over a little path either side of where they meet, never a jolt; it slows into
+ * the stretch, and picks up out of it, as a zone does.
+ */
+type Stretch = { from: number; to: number; speed: number }[];
+const BLEND = 0.6;
+function stretchPace(order: Stretch, d: number, enter = 3, leave = 3): number {
+  const first = order[0];
+  const last = order[order.length - 1];
+  if (d < first.from - 2 - enter || d > last.to + leave) return 1;
+  let speed = first.speed;
+  for (let k = 1; k < order.length; k++) speed = THREE.MathUtils.lerp(speed, order[k].speed, smooth(d, order[k].from - BLEND, order[k].from + BLEND));
+  const into = smooth(d, first.from - 2 - enter, first.from - 2);
+  const out = smooth(d, last.to, last.to + leave);
+  return THREE.MathUtils.lerp(1, speed / SPEED, into * (1 - out));
+}
+
+/**
+ * The levers' run, after « Activer » (network.ts, levers.ts): slowed for each lever, while
+ * the impulse comes to it, it is thrown and its badge's hologram builds (from where it is
+ * named, three units), then picking up to the next. A touch quicker than it was, on the whole.
+ */
+const LEVER_SLOW = 0.95;
+const LEVER_FAST = 3.2;
+/** From where a lever is named, how much of the way to the next the ride stays slow. */
+const LEVER_HOLD = 4.2;
+/** Once the levers have risen, on to the first; once the last is thrown, on up the path. */
+const LEVER_APPROACH = 1.6;
+const LEVER_LEAVE = 2;
+let leverStretch: Stretch | null = null;
+/** Laid out on first use (LEVERS is declared further down). */
+const leverStretchOf = (): Stretch => (leverStretch ??= (() => {
+  const chosen = LEVERS.row.filter((lever) => lever.chosen).map((lever) => lever.at);
+  const order: Stretch = [{ from: LEVERS_FIRST_IMPULSE, to: chosen[0] - 5.5, speed: LEVER_APPROACH }];
+  for (const at of chosen) {
+    order.push({ from: at - 5.5, to: at - 5.5 + LEVER_HOLD, speed: LEVER_SLOW });
+    order.push({ from: at - 5.5 + LEVER_HOLD, to: at + 0.5, speed: LEVER_FAST });
+  }
+  order.push({ from: chosen[chosen.length - 1] + 0.5, to: LEVERS_END, speed: LEVER_LEAVE });
+  return order;
+})());
 
 /** Share of SPEED at this distance (1 between sequences). */
 export function paceAt(distance: number): number {
@@ -81,7 +132,23 @@ export function paceAt(distance: number): number {
     const inside = plateau(distance, zone.from - zone.ease, zone.from, zone.to, zone.to + zone.ease);
     pace = Math.min(pace, 1 - (1 - zone.pace) * inside);
   }
+  // « Structurer »'s act, badge by badge (timeline.ts), and the levers' run.
+  pace = Math.min(pace, stretchPace(STRUCTURE_ACT.order, distance));
+  pace = Math.min(pace, stretchPace(leverStretchOf(), distance, 1.5, 3));
   return pace;
+}
+
+/**
+ * How quickly the ride's speed follows its pace (terrain.ts): over the stretches that
+ * alternate, it answers within about half a second, so a short run between two badges is
+ * felt; elsewhere it eases more slowly, as it always has.
+ */
+export function responseAt(distance: number): number {
+  const alternating = Math.max(
+    plateau(distance, STRUCTURE_ACT.from - 2, STRUCTURE_ACT.from, STRUCTURE_ACT.to - 4, STRUCTURE_ACT.to),
+    plateau(distance, LEVERS_FIRST_IMPULSE - 1, LEVERS_FIRST_IMPULSE + 1, LEVERS_END - 2, LEVERS_END) * 0.7,
+  );
+  return THREE.MathUtils.lerp(1.2, 2.4, alternating);
 }
 
 /**
@@ -112,28 +179,29 @@ export const LEVERS = {
   share: 0.4,
 } as const;
 
-/** « Mesurer pour décider »'s chart, on the right before the summit: the eyes go to it a little. */
-const { chartBuild, chartDraw, chartGone } = MEASURE_ACT.beats;
+/**
+ * « Mesurer pour décider »'s chart, on the summit (monitor.ts): it stands ahead over the top,
+ * in the middle of the view, once the ride has stopped. Its moments, in seconds after the
+ * stop (timeline.ts, ENDING): frame and axes draw in with the note, the curve draws, it
+ * stays, it goes.
+ */
 export const CHART = {
-  /** Where it stands along the path, and how far right of the lane (narrow screens: closer). */
-  at: 193,
-  offset: 6.4,
-  narrowOffset: 2.6,
-  /** Guide distances (timeline.ts): frame and axes draw in, the curve draws, it stays, it goes. */
-  build: chartBuild,
-  draw: chartDraw,
-  gone: chartGone,
-  look: [chartBuild[0] - 2, chartBuild[0] + 1.5, chartGone[0] - 0.5, chartGone[1] + 1.5] as [number, number, number, number],
-  lookAmount: 0.62,
+  /** How far ahead of the stop it stands, how high its foot is over the top, and its size on a portrait phone. */
+  ahead: 15,
+  lift: 4.3,
+  narrowScale: 0.42,
+  build: ENDING.measure.build,
+  draw: ENDING.measure.draw,
+  gone: ENDING.measure.gone,
 } as const;
 
 /**
- * How much the eyes leave the path ahead, at this distance, for the levers and for the
- * chart (share of the way to them, terrain.ts). Eased in and out at both ends, so a turn
- * starts and ends gently; between the left and right levers it comes back to the path.
+ * How much the eyes leave the path ahead, at this distance, for the levers (share of the way
+ * to them, terrain.ts). Eased in and out at both ends, so a turn starts and ends gently;
+ * between the left and right levers it comes back to the path.
  */
 export function lookWeights(distance: number) {
-  return { levers: plateau(distance, ...LEVERS.look) * LEVERS.share, chart: plateau(distance, ...CHART.look) * CHART.lookAmount };
+  return { levers: plateau(distance, ...LEVERS.look) * LEVERS.share };
 }
 
 /** When a chosen lever is thrown, the eyes are on it: the middle of its throw, before the guide reaches it. */

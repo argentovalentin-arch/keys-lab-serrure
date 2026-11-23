@@ -33,8 +33,14 @@ const GATHER = 10;
 const SETTLE = 3.2;
 /** The paving front runs this far ahead of the guide at most… */
 const LEAD = 14;
-/** …catching up with it from the start this many times faster than the guide moves. */
-const CATCH_UP = 2.2;
+/**
+ * …catching up with it from the start this many times faster than the guide moves (the
+ * guide reads « Clarifier les fondations. » slowly: at this rate the front runs as fast as it
+ * did, and the first pavers form about half a second after it sets off).
+ */
+const CATCH_UP = 3.2;
+/** Guide travel from where the paving sets off to the first pavers forming (they condense from 0.45 on, below). */
+export const FIRST_FORMS = (0.45 * SETTLE) / CATCH_UP;
 
 export interface PavementOptions {
   /** Guide distance from which the paving runs, and the stretch of path it paves. */

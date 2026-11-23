@@ -11,7 +11,7 @@ import { BRAND, LAB } from '../core/brand';
  * them. It rises out of the lit path to the first lever, which it throws; from there it
  * bounces across the path to the next, on the other side, which it throws in turn; and so
  * on, left, right, left, right, until the last two, side by side on the right, where it
- * runs along; from the last it is sent on up the path, towards what comes next.
+ * runs along. It ends there, on the last lever: nothing leaves it for the summit.
  *
  * Each leg is an impulse that can be followed with the eye: a bright head with a trail,
  * travelling along an arch over the path (lower along one side), leaving a faint trace;
@@ -39,7 +39,7 @@ export interface NetworkOptions {
 }
 
 export function createNetwork(scene: THREE.Scene, { stops, throwFrom, throwTo, time }: NetworkOptions) {
-  // The legs: from the path to the first lever, from each lever to the next, from the last up the path.
+  // The legs: from the path to the first lever, then from each lever to the next.
   interface Leg { from: THREE.Vector3; to: THREE.Vector3; start: number; end: number; height: number }
   const legs: Leg[] = [];
   const top = (p: THREE.Vector3) => p.clone().setY(p.y + KNOB);
@@ -55,8 +55,6 @@ export function createNetwork(scene: THREE.Scene, { stops, throwFrom, throwTo, t
       // From the end of one throw to the start of the next: the impulse arrives as it is thrown.
       legs.push({ from: top(a.place), to: top(b.place), start: a.at - throwTo, end: b.at - throwFrom, height: across ? 2.1 : 1.1 });
     }
-    const last = stops[stops.length - 1];
-    legs.push({ from: top(last.place), to: onPath(last.at + 14, 1.6), start: last.at - throwTo, end: last.at + 3, height: 1.6 });
   }
 
   const data: number[] = [];
@@ -129,7 +127,8 @@ export function createNetwork(scene: THREE.Scene, { stops, throwFrom, throwTo, t
 
   const smooth = THREE.MathUtils.smoothstep;
   const first = legs[0]?.start ?? 0;
-  const lastEnd = legs[legs.length - 1]?.end ?? 0;
+  // The traces between the levers stay a moment after the last one is thrown, then go as before.
+  const lastEnd = stops.length ? stops[stops.length - 1].at + 3 : 0;
   return {
     /** From the guide's distance: each leg travels over its stretch; it lands as the next lever is thrown. */
     update(distance: number, lookingBack: number) {

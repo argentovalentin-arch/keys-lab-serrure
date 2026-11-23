@@ -1,4 +1,4 @@
-import { ACTIVATE_ACT, ENDING, MEASURE_ACT, STRUCTURE_ACT } from './timeline';
+import { ACTIVATE_ACT, ENDING, STRUCTURE_ACT } from './timeline';
 
 /**
  * A few short markers for the visitor, set in the scene beside the path between the
@@ -18,10 +18,12 @@ export interface Note {
   text: string;
   /** -1 left of the path, 1 right of it, 0 centred over its anchor. */
   side: -1 | 0 | 1;
+  /** On the summit: how high over the eye it stands (world units, terrain.ts). */
+  over?: number;
 }
 
 /** What each ride note is about; the Terrain shows something in the scene for each (terrain.ts). */
-export type NoteTopic = 'understand' | 'foundations' | 'levers' | 'measure';
+export type NoteTopic = 'understand' | 'foundations' | 'levers';
 
 interface RideNote extends Note {
   topic: NoteTopic;
@@ -41,9 +43,8 @@ const RIDE: RideNote[] = [
   { topic: 'understand', ...stretch(STRUCTURE_ACT.beats.understandNote), side: -1, text: 'Comprendre *avant* de proposer.' },
   { topic: 'foundations', ...stretch(STRUCTURE_ACT.beats.foundationsNote), side: 1, text: 'Clarifier les *fondations*.' },
   // Activer → Performer: the right levers, not all of them, read before they rise and the
-  // energy runs through them; then measuring to decide, read before the chart draws itself.
+  // energy runs through them. Measuring to decide belongs to the summit (below).
   { topic: 'levers', ...stretch(ACTIVATE_ACT.beats.leversNote), side: 1, text: 'Les *bons* leviers. Pas tous.' },
-  { topic: 'measure', ...stretch(MEASURE_ACT.beats.measureNote), side: -1, text: 'Mesurer pour *décider*.' },
 ];
 
 /** The stretch of path (guide distances) over which the note on a topic shows. */
@@ -55,12 +56,15 @@ export function noteStretch(topic: NoteTopic): { from: number; to: number } {
 /** How far past the end of its stretch a note stands. */
 const NOTE_LEAD = 9;
 
-/** On the summit, still facing ahead: every result traced back to an action, read before its badges come. */
-const SUMMIT: Note & { afterStop: [number, number] } = {
-  side: 0,
-  afterStop: ENDING.note,
-  text: 'Chaque résultat relié à *une action*.',
-};
+/**
+ * On the summit, still facing ahead (timeline.ts, ENDING): measuring to decide, with its
+ * chart; then every result traced back to an action, with its keys.
+ */
+const SUMMIT: (Note & { afterStop: [number, number] })[] = [
+  // Over its chart, which stands up by the horizon (pace.ts, CHART.lift).
+  { side: 0, afterStop: ENDING.measure.note, over: 5.7, text: 'Mesurer pour *décider*.' },
+  { side: 0, afterStop: ENDING.note, text: 'Chaque résultat relié à *une action*.' },
+];
 
 export interface NoteState {
   note: Note;
@@ -76,8 +80,8 @@ export interface NoteState {
  */
 export function noteAt(distance: number, sinceStop: number | null): NoteState | null {
   if (sinceStop !== null) {
-    const [from, to] = SUMMIT.afterStop;
-    return sinceStop >= from && sinceStop < to ? { note: SUMMIT, at: null, t: (sinceStop - from) / (to - from) } : null;
+    const note = SUMMIT.find(({ afterStop: [from, to] }) => sinceStop >= from && sinceStop < to);
+    return note ? { note, at: null, t: (sinceStop - note.afterStop[0]) / (note.afterStop[1] - note.afterStop[0]) } : null;
   }
   for (const note of RIDE) {
     if (distance >= note.from && distance < note.to) {

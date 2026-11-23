@@ -16,10 +16,12 @@ import { BRAND, LAB } from '../core/brand';
  * chart says in which order things happen, nothing else. So there is no figure on it, no
  * area under the curve, no target, no cursor: only the order, drawn.
  *
- * It builds itself in order, as the visitor comes up to it (pace.ts, CHART): the frame's
- * corners and the pillars draw in from the left, then the curve draws itself through the
- * steps, its head bright; motes drift up through it. Its labels (terrain.ts) name the
- * pillars and each step as the curve reaches it.
+ * It stands on the summit, ahead over the top, once the ride has stopped: « Mesurer pour
+ * décider » and it are one event (timeline.ts, ENDING). It builds itself in order, on the
+ * summit's clock (pace.ts, CHART): the frame's corners and the pillars draw in from the left
+ * as the note comes in, then the curve draws itself through the steps, its head bright;
+ * motes drift up through it; it holds, then draws back into its source as the note goes.
+ * Its labels (terrain.ts) name the pillars and each step as the curve reaches it.
  */
 
 const WIDTH = 9.6;
@@ -193,33 +195,31 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
   const pool = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH * 1.1, 2.6).rotateX(-Math.PI / 2), poolMaterial);
   scene.add(pool);
 
-  // Set once (it stands still in the land), again only if the screen's shape changes: on
-  // a portrait phone it stands nearer the lane, and smaller, to stay in the view.
+  // On the summit, ahead of where the ride came to rest, square to the eye; on a portrait
+  // phone smaller, to stay whole in the narrow view.
   const position = new THREE.Vector3();
   const rotation = new THREE.Quaternion();
   const euler = new THREE.Euler();
   const scale = new THREE.Vector3(1, 1, 1);
-  let placedNarrow: boolean | null = null;
-  const place = (narrow: boolean) => {
-    placedNarrow = narrow;
-    const p = CHART.at;
+  const place = (stop: number, narrow: boolean) => {
+    const p = stop + CHART.ahead;
     const heading = headingAt(p);
-    const offset = narrow ? CHART.narrowOffset : CHART.offset;
-    const px = centerX(p) + offset * Math.cos(heading);
-    const pz = -p + offset * Math.sin(heading);
+    const px = centerX(p);
+    const pz = -p;
+    // Measured from the top where the ride stopped (beyond it the ground falls away), so it
+    // stands in the middle of the view.
+    const top = groundAt(centerX(stop), -stop);
     const ground = groundAt(px, pz);
-    // Raised so its lowest pillar stands clear of the horizon's light.
-    position.set(px, ground + (narrow ? 0.75 : 1.7), pz);
-    // Turned towards the visitor coming up the path, a little in towards it.
-    rotation.setFromEuler(euler.set(0, -heading - (narrow ? 0.3 : 0.32), 0));
-    scale.setScalar(narrow ? 0.48 : 1);
+    position.set(px, top + CHART.lift * (narrow ? 1.1 : 1), pz);
+    rotation.setFromEuler(euler.set(0, -heading, 0));
+    scale.setScalar(narrow ? CHART.narrowScale : 1);
     placement.value.compose(position, rotation, scale);
     // The pool's plane is laid flat in its geometry: it only turns with the chart.
     pool.position.set(px, ground + 0.04, pz);
     pool.quaternion.copy(rotation);
     pool.scale.setScalar(scale.x);
   };
-  place(false);
+  place(0, false);
 
   const smooth = THREE.MathUtils.smoothstep;
   const toWorld = (cx: number, cy: number, z = 0) =>
@@ -230,20 +230,30 @@ export function createMonitor(scene: THREE.Scene, { time }: MonitorOptions) {
     pillarEnd: (i: number) => toWorld(-0.06, PILLAR_LEVELS[i], -BACK),
     /** World position of its middle, where the eyes go. */
     centre: () => toWorld(0.5, 0.45),
-    /** The guide distance at which the curve reaches a point of it (0..1 across). */
-    distanceAt: (x: number) => CHART.draw[0] + x * (CHART.draw[1] - CHART.draw[0]),
+    /** The moment (seconds after the stop) at which the curve reaches a point of it (0..1 across). */
+    timeAt: (x: number) => CHART.draw[0] + x * (CHART.draw[1] - CHART.draw[0]),
     /** 0..1: how much it shows now. */
     get shown() { return shown.value; },
     /** 0..1: how much its labels show (they go first, as it starts drawing back into its source). */
     get labelsShown() { return shown.value * (1 - smooth(retract.value, 0, 0.25)); },
-    /** From the guide's distance: it builds, draws its curve, stays to be read, and goes. */
-    update(distance: number, narrow: boolean) {
-      if (narrow !== placedNarrow) place(narrow);
+    /**
+     * On the summit's clock (seconds after the stop; null while riding, when it is not
+     * there): it builds, draws its curve, stays to be read, and goes. `stop`: the guide's
+     * distance where the ride came to rest.
+     */
+    update(sinceStop: number | null, stop: number, narrow: boolean) {
+      if (sinceStop === null) {
+        shown.value = 0;
+        sprite.visible = pool.visible = false;
+        return;
+      }
+      const s = sinceStop;
+      if (s < CHART.build[0]) place(stop, narrow);
       // It draws back into its source over its going, and is out a little before the end of it.
-      retract.value = smooth(distance, CHART.gone[0] - 0.6, CHART.gone[1]);
-      shown.value = smooth(distance, CHART.build[0] - 1, CHART.build[0] + 0.5) * (1 - smooth(distance, CHART.gone[0] + 0.4, CHART.gone[1]));
-      build.value = smooth(distance, CHART.build[0], CHART.build[1]);
-      reveal.value = THREE.MathUtils.clamp((distance - CHART.draw[0]) / (CHART.draw[1] - CHART.draw[0]), 0, 1);
+      retract.value = smooth(s, CHART.gone[0] - 0.3, CHART.gone[1]);
+      shown.value = smooth(s, CHART.build[0] - 0.2, CHART.build[0] + 0.3) * (1 - smooth(s, CHART.gone[0] + 0.2, CHART.gone[1]));
+      build.value = smooth(s, CHART.build[0], CHART.build[1]);
+      reveal.value = THREE.MathUtils.clamp((s - CHART.draw[0]) / (CHART.draw[1] - CHART.draw[0]), 0, 1);
       sprite.visible = pool.visible = shown.value > 0.001;
     },
     /** It is gone by the summit; kept hidden for the view back. */

@@ -1,9 +1,9 @@
 import * as THREE from 'three/webgpu';
 import {
-  abs, color, exp, float, instancedBufferAttribute, normalView, positionLocal, pow, smoothstep, uniform, uv,
+  abs, color, exp, float, instancedBufferAttribute, mix, normalView, positionLocal, pow, smoothstep, uniform, uv, vec2,
 } from 'three/tsl';
 import { buildKeyGeometry } from '../world/keyMesh';
-import { bowHangPoint } from '../world/shapes';
+import { MEDALLION, OFFSET_X, bowHangPoint } from '../world/shapes';
 import { graduatedRing } from './projection';
 import { BRAND, LAB } from '../core/brand';
 
@@ -13,8 +13,15 @@ const ARC_POINTS = 80;
 const smooth = THREE.MathUtils.smoothstep;
 
 export interface SummitTiming {
-  /** When each action badge comes in (seconds after the stop), in order. */
-  badgesAt: number[];
+  /**
+   * When each key's arc sets off from its action (seconds after the stop), in order: with
+   * the summit's note, one event (timeline.ts, ENDING); and when the keys, all formed,
+   * gather on their ring.
+   */
+  keysAt: number[];
+  gatherAt: number;
+  /** When the thread linking the three actions draws itself, before any key forms. */
+  linkAt: [number, number];
 }
 
 /**
@@ -22,13 +29,14 @@ export interface SummitTiming {
  * - arriving: a wave of light runs out over the top from where the ride stopped, and a
  *   column of light rises ahead, where the key ring will hang, the climb's end marked like
  *   its landmarks; it settles to a thread of light before the note comes in;
- * - then, as each action badge comes in (terrain.ts), an arc of particles rises from it to
- *   a key of light, in the « k. » design of the key that opened the door: one key per
- *   action, the badge's hologram (« l'épure lumineuse »);
+ * - once the three actions have been shown, a thread of light links them, from the outer two
+ *   in to the middle: three parts of one whole;
+ * - then, with the note, from each action an arc of particles goes to a key of light, in the
+ *   « k. » design of the key that opened the door: each action gives its key;
  * - once all are there, the keys gather on a ring that is the brand's graduated rule, at
  *   the crown's apex (crown.ts): every action held together.
  */
-export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
+export function createSummit(scene: THREE.Scene, { keysAt, gatherAt, linkAt }: SummitTiming) {
   const since = uniform(-1);
   const gone = uniform(1); // 1 until the turn, then fading out
 
@@ -61,11 +69,11 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
   scene.add(beam);
 
   // ---- Arcs of particles from each action up to its key.
-  const arcCount = badgesAt.length;
+  const arcCount = keysAt.length;
   const positions = new THREE.InstancedBufferAttribute(new Float32Array(arcCount * ARC_POINTS * 3), 3);
   const params = new THREE.InstancedBufferAttribute(new Float32Array(arcCount * ARC_POINTS * 2), 2);
-  const arcStarts = badgesAt.map((t) => t + 0.45);
-  const ARC_DRAW = 1.1;
+  const arcStarts = keysAt;
+  const ARC_DRAW = 0.9;
   for (let a = 0; a < arcCount; a++) {
     for (let k = 0; k < ARC_POINTS; k++) params.setXY(a * ARC_POINTS + k, k / (ARC_POINTS - 1), arcStarts[a]);
   }
@@ -90,6 +98,37 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
   arcs.frustumCulled = false;
   arcs.visible = false;
   scene.add(arcs);
+
+  // ---- The thread linking the three actions: points of light along a gentle curve through
+  // the three badges, drawn from the outer two in to the middle, a pulse then running out
+  // from the middle to each; it stays, faint, while the keys form from them.
+  const LINK_POINTS = 120;
+  const linkPositions = new THREE.InstancedBufferAttribute(new Float32Array(LINK_POINTS * 3), 3);
+  const linkParams = new THREE.InstancedBufferAttribute(new Float32Array(LINK_POINTS), 1);
+  for (let k = 0; k < LINK_POINTS; k++) linkParams.setX(k, k / (LINK_POINTS - 1));
+  const linkPoint = instancedBufferAttribute(linkPositions);
+  const linkU = instancedBufferAttribute(linkParams, 'float') as unknown as THREE.Node<'float'>;
+  const linkDraw = uniform(0);
+  const linkPulse = uniform(-1);
+  const linkFade = uniform(0);
+  // From each end in: a point is drawn once the draw has reached it from its nearer end.
+  const fromEnd = float(0.5).sub(abs(linkU.sub(0.5)));
+  const linkShown = smoothstep(fromEnd.sub(0.02), fromEnd, linkDraw.mul(0.5));
+  const linkHead = exp(fromEnd.sub(linkDraw.mul(0.5)).abs().mul(-60)).mul(linkDraw.lessThan(1).select(float(1), float(0)));
+  const pulse = exp(abs(linkU.sub(0.5)).sub(linkPulse.mul(0.5)).abs().mul(-40)).mul(linkPulse.greaterThan(0).select(float(1), float(0)));
+  const linkMaterial = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const linkDot = float(1).sub(uv().sub(0.5).length().mul(2)).clamp(0, 1);
+  linkMaterial.positionNode = linkPoint;
+  linkMaterial.colorNode = color(WARM).mul(float(1).add(linkHead.add(pulse).mul(1.2)));
+  linkMaterial.opacityNode = linkDot.mul(linkDot).mul(linkShown.mul(0.55).add(linkHead.mul(0.8)).add(pulse.mul(0.9))).mul(linkFade);
+  linkMaterial.scaleNode = float(0.1).add(linkHead.add(pulse).mul(0.12));
+  const link = new THREE.Sprite(linkMaterial);
+  link.count = LINK_POINTS;
+  link.frustumCulled = false;
+  link.visible = false;
+  scene.add(link);
+  const linkCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]);
+  const linkAt3 = new THREE.Vector3();
 
   // ---- The key ring, made of the Lab's own light (« l'épure lumineuse »): one key per
   // action, in the « k. » design of the key that opened the door (shapes.ts, keyMesh.ts),
@@ -128,13 +167,19 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
       shown = smoothstep(reach.add(0.06), reach.sub(0.06), away);
       front = exp(away.sub(reach).div(0.08).pow(2).negate()).mul(float(1).sub(smoothstep(0.9, 1, reveal)));
     }
+    // The medallion with the brand's « k. » on the key's bow: many edges close together, it
+    // burned and bloomed. Its light is kept lower, so the mark reads finely, not as a glare.
+    const emblem = reveal
+      ? smoothstep(MEDALLION.outer + 0.15, MEDALLION.outer - 0.1, vec2(positionLocal.x.sub(MEDALLION.cx + OFFSET_X), positionLocal.y).length())
+      : float(0);
+    const calm = mix(float(1), float(0.42), emblem);
     // Fainter in hand, close to the eye, where several keys overlap.
-    material.colorNode = color(BRAND.champagne).mul(rim.mul(1.25).add(0.07).add(front.mul(1.6)))
-      .add(color(LAB.lightCore).mul(glow.mul(0.5))).mul(float(1).sub(inHand.mul(0.3)));
+    material.colorNode = color(BRAND.champagne).mul(rim.mul(1.25).add(0.07).add(front.mul(1.6)).mul(calm))
+      .add(color(LAB.lightCore).mul(glow.mul(0.5).mul(mix(float(1), float(0.25), emblem)))).mul(float(1).sub(inHand.mul(0.3)));
     material.opacityNode = fade.mul(held).mul(shown.max(front));
     return material;
   };
-  const gather = arcStarts[arcStarts.length - 1] + ARC_DRAW + 0.2;
+  const gather = Math.max(gatherAt, arcStarts[arcStarts.length - 1] + ARC_DRAW + 0.2);
   const GATHER_OVER = 0.85;
   const RING_RADIUS = 0.8;
 
@@ -142,7 +187,7 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
   const bunch = new THREE.Group();
   bunch.visible = false;
   scene.add(bunch);
-  const keys = badgesAt.map((_, i) => {
+  const keys = keysAt.map((_, i) => {
     const fade = uniform(0);
     const glow = uniform(0);
     const reveal = uniform(0);
@@ -197,7 +242,7 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
 
   const control = new THREE.Vector3();
   const offset = new THREE.Vector3();
-  const arcFrom = badgesAt.map(() => new THREE.Vector3());
+  const arcFrom = keysAt.map(() => new THREE.Vector3());
   /** Arc `a`, from its action badge's point to `end`: rising first, then bending over into it. */
   const drawArc = (a: number, end: THREE.Vector3) => {
     const from = arcFrom[a];
@@ -227,18 +272,29 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
      * and the ring at `top`, the arcs from each action badge's point on the ground
      * (`starts`, in order) to its key, spread in a row under the ring.
      */
-    place(summit: THREE.Vector3, starts: THREE.Vector3[], top: THREE.Vector3) {
+    place(summit: THREE.Vector3, starts: THREE.Vector3[], top: THREE.Vector3, spread = 4) {
       wave.position.copy(summit).setY(summit.y + 0.1);
       // The column stands where the ring will hang, from the ground up.
       beam.position.copy(top).setY(top.y - 9 + 20);
       ringCentre.copy(top).setY(top.y + 1.6);
       starts.forEach((from, a) => {
-        // Spread in a row, each over its own badge's side (relative to the ring's centre).
-        keys[a].spread.set((a - 1) * 4, (a === 1 ? -0.4 : -1.1) - 1.6, 0);
+        // Spread in a row, each under its own action (relative to the ring's centre).
+        keys[a].spread.set((a - 1) * spread, (a === 1 ? -0.4 : -1.1) - 1.6, 0);
         arcFrom[a].copy(from);
         drawArc(a, offset.copy(keys[a].spread).add(ringCentre));
       });
       positions.needsUpdate = true;
+      // The thread through the three actions, sagging a little between them.
+      if (starts.length === 3) {
+        linkCurve.points[0].copy(starts[0]);
+        linkCurve.points[1].copy(starts[1]).setY(starts[1].y - 0.35);
+        linkCurve.points[2].copy(starts[2]);
+        for (let k = 0; k < LINK_POINTS; k++) {
+          linkCurve.getPoint(k / (LINK_POINTS - 1), linkAt3);
+          linkPositions.setXYZ(k, linkAt3.x, linkAt3.y, linkAt3.z);
+        }
+        linkPositions.needsUpdate = true;
+      }
     },
     /**
      * Seconds since the stop (null while riding), the camera (the column faces it, the ring
@@ -334,6 +390,13 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
       ringFade.value = on ? smooth(s, gather - 0.4, gather + 0.2) : 0;
       ring.visible = ringFade.value > 0.001;
       bunch.visible = on && held.value > 0.001 && keys.some((k) => k.fade.value > 0.001);
+      // The thread: drawn in over its moment, a pulse out from the middle once it is whole;
+      // it goes with the arcs, as the ring is taken in hand.
+      linkDraw.value = on ? smooth(s, linkAt[0], linkAt[0] + (linkAt[1] - linkAt[0]) * 0.6) : 0;
+      const pulsing = on ? (s - (linkAt[0] + (linkAt[1] - linkAt[0]) * 0.6)) / ((linkAt[1] - linkAt[0]) * 0.4) : -1;
+      linkPulse.value = pulsing > 0 && pulsing < 1 ? pulsing : -1;
+      linkFade.value = on ? smooth(s, linkAt[0] - 0.1, linkAt[0] + 0.2) * (1 - 0.6 * smooth(s, linkAt[1], linkAt[1] + 1)) * gone.value : 0;
+      link.visible = linkFade.value > 0.001;
       wave.visible = waveFade.value > 0.001;
       beam.visible = beamFade.value > 0.001;
       arcs.visible = on && s > arcStarts[0] && gone.value > 0.001;
@@ -345,7 +408,7 @@ export function createSummit(scene: THREE.Scene, { badgesAt }: SummitTiming) {
       ringGeometry.dispose();
       rule.geometry.dispose();
       const materials = [
-        waveMaterial, beamMaterial, arcMaterial, ringMaterial, ruleMaterial, ...keys.map((k) => k.material),
+        waveMaterial, beamMaterial, arcMaterial, linkMaterial, ringMaterial, ruleMaterial, ...keys.map((k) => k.material),
       ];
       for (const material of materials) material.dispose();
     },

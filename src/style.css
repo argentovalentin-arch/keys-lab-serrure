@@ -584,19 +584,23 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 
 .terrain-ui__message.is-hidden, .terrain-ui__hint.is-hidden, .terrain-ui__word.is-hidden { opacity: 0; }
 
-/* The closing choices, just under the visitor's curve. The chart's time axis sits a
-   little above mid-height whatever the screen (the camera's vertical field of view is
-   fixed), so the choices are anchored from the top, between the chart and the mountain. */
+/* The closing choices, just under the visitor's curve. The chart's time axis sits up by
+   the horizon whatever the screen (the camera's vertical field of view is fixed; reward.ts,
+   CURVE_AXIS), so the choices are anchored from the top, between the chart and the mountain. */
 .terrain-ui__end {
   position: absolute;
   left: var(--gutter);
   right: var(--gutter);
-  top: 53%;
+  top: 42.5%;
   text-align: center;
   animation: terrain-end-in 0.9s ease both;
 }
 
 .terrain-ui__end[hidden] { display: none; }
+
+@media (max-aspect-ratio: 9/10) {
+  .terrain-ui__end { top: 38%; }
+}
 
 .terrain-ui__caption {
   margin: 0;

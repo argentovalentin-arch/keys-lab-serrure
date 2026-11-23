@@ -102,7 +102,9 @@ export function createRelief(scene: THREE.Scene, count: number) {
   const haze = drop.mul(clamp(depth.sub(1).mul(1.5), 0, 1));
   const shape = particleShape();
   const worldPoint = vec3(isLane.select(laneX, mountainX), deepenNode(isLane.select(laneY, mountainY)), isLane.select(laneZ, mountainZ));
-  const tone = topoTone(normal, cavity, cameraPosition.sub(worldPoint).normalize());
+  // Its topography marked more strongly from the summit (topography.ts); from the sea, as it was.
+  const contrast = uniform(0);
+  const tone = topoTone(normal, cavity, cameraPosition.sub(worldPoint).normalize(), contrast);
   // The lane: the route itself, in the light tone, as on the ride; the landmarks warm.
   const base = isLane.select(mix(color(CREAM), color(WARM), 0.6), mix(tone.colour, color(WARM), landmarks.min(1)));
   material.colorNode = coreColor(varying(mix(base, color(LOW), haze.mul(0.45))), shape.core).mul(1.25);
@@ -125,7 +127,7 @@ export function createRelief(scene: THREE.Scene, count: number) {
   // contour lines most of all, as they draw the mountain's shape from a distance
   // (topography.ts, the same rule as for the islands).
   const fromEye = worldPoint.sub(cameraPosition).length();
-  material.scaleNode = isLane.select(float(0.16).add(seedC.pow(6).mul(0.12)).mul(SPRITE_GROWTH).mul(fromEye.div(55).max(1).pow(0.85)), topoSize(fromEye, onContour, seedC))
+  material.scaleNode = isLane.select(float(0.16).add(seedC.pow(6).mul(0.12)).mul(SPRITE_GROWTH).mul(fromEye.div(55).max(1).pow(0.85)), topoSize(fromEye, onContour, seedC).mul(tone.size))
     .mul(float(1).sub(fromSea.mul(0.5)));
   const points = new THREE.Sprite(material);
   points.count = count;
@@ -137,13 +139,15 @@ export function createRelief(scene: THREE.Scene, count: number) {
   // included, which reappears further down: the mountain has a body, not only lines.
   const SURFACE = 200;
   const surfaceGeometry = new THREE.PlaneGeometry(footprint * 2, footprint * 2, SURFACE, SURFACE).rotateX(-Math.PI / 2);
-  const surfaceMaterial = new THREE.MeshBasicNodeMaterial({ colorWrite: false, side: THREE.DoubleSide });
+  // Drawn among the see-through things, after the horizon's band and the last light (which
+  // it must never hide) and before every point (which it hides when they lie behind a slope).
+  const surfaceMaterial = new THREE.MeshBasicNodeMaterial({ colorWrite: false, transparent: true, depthWrite: true, side: THREE.DoubleSide });
   const groundX = positionLocal.x;
   const groundZ = positionLocal.z.add(SUMMIT_Z);
   surfaceMaterial.positionNode = vec3(groundX, deepenNode(groundNode(groundX, groundZ)).sub(depth.mul(0.55)), groundZ);
   const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
   surface.frustumCulled = false;
-  surface.renderOrder = -2;
+  surface.renderOrder = -1;
   surface.visible = false;
   scene.add(surface);
 
@@ -201,6 +205,7 @@ export function createRelief(scene: THREE.Scene, count: number) {
       shown.value = amount;
       bandOn.value = 0;
       fromSea.value = 0;
+      contrast.value = 1;
       points.visible = amount > 0.001;
       surface.visible = amount > 0.5;
       start.visible = amount > 0.001;
@@ -211,19 +216,35 @@ export function createRelief(scene: THREE.Scene, count: number) {
       return shown.value;
     },
     /**
-     * While crossing: the mountain seen from the sea, all of it but the band the ride's
-     * field draws (from the guide's distance `at`); `amount` 0..1.
+     * While riding, from the sea to the summit: the whole mountain around, all of it but the
+     * band the ride's own field draws (from the guide's distance `at`), finer than from the
+     * top; `amount` 0..1, and how marked its topography is (topography.ts: none from the sea,
+     * as the field from the climb on).
      */
-    setCrossing(amount: number, at: number) {
+    setCrossing(amount: number, at: number, marked = 0) {
       this.setShown(amount);
       bandOn.value = 1;
       fromSea.value = 1;
+      contrast.value = marked;
       bandAt.value = at;
       // Its unseen ground stays: the open sea beyond the mountain does not show through it,
       // so the horizon's line stops where the land stands in front of it.
       surface.visible = amount > 0.5;
       // The start's column is for the view from the top; at the shore it would blind.
       start.visible = false;
+    },
+    /**
+     * On the summit, from the mountain as ridden to the mountain seen whole from the top:
+     * `whole` 0..1 lifts the band's gap and brings its points to their size from above, so
+     * it never goes out and comes back.
+     */
+    setFromTop(whole: number, at: number) {
+      this.setShown(1);
+      bandAt.value = at;
+      bandOn.value = 1 - whole;
+      fromSea.value = 1 - whole;
+      start.visible = whole > 0.001;
+      line.visible = whole > 0.001 && line.userData.ready === true;
     },
     /** Lays the visitor's line along the route, once the ride is over. */
     setJourney(trajectory: TrajectoryPoint[], end: number, width: number) {

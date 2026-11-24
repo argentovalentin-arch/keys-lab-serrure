@@ -47,6 +47,7 @@ export class FrameMonitor {
   private elapsed = 0;
   private windowTime = 0;
   private windowFrames = 0;
+  private held = false;
 
   constructor(private tier: Tier, private readonly onDowngrade: (tier: Tier) => void, private readonly enabled = true) {}
 
@@ -54,9 +55,18 @@ export class FrameMonitor {
     return this.tier;
   }
 
+  /**
+   * While other work shares the GPU for a moment (the Terrain prepared in the background,
+   * ui/epilogue.ts), its frames say nothing about this device: they are not counted.
+   */
+  hold(on: boolean): void {
+    this.held = on;
+    this.windowTime = this.windowFrames = 0;
+  }
+
   /** Call once per rendered frame with its duration in seconds. */
   sample(dt: number): void {
-    if (!this.enabled || this.tier === 'low') return;
+    if (!this.enabled || this.tier === 'low' || this.held) return;
     this.elapsed += dt;
     if (this.elapsed < WARMUP) return;
     // Long gaps mean a hidden tab or a breakpoint, not a slow GPU.

@@ -6,6 +6,8 @@
   --cream: #fdfbf5;
   --cream-soft: rgba(253, 251, 245, 0.65);
   --champagne: #e9d7b4;
+  /* The champagne of the words set apart in the notes: the brand's, its hue kept, richer. */
+  --champagne-vivid: #f1d4a0;
   --prune: #3b2144;
   --hairline-inverse: rgba(253, 251, 245, 0.25);
   --serif: 'Bodoni Moda', Didot, serif;
@@ -417,7 +419,7 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 .terrain-tag__holo {
   position: relative;
   display: block;
-  margin-bottom: 9px;
+  margin-bottom: 12px;
   isolation: isolate;
   transform-origin: 50% 100%;
   animation: terrain-holo-in 0.45s ease 0.65s both;
@@ -425,7 +427,7 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 .terrain-tag__holo::before {
   content: '';
   position: absolute;
-  inset: -16px -22px -6px;
+  inset: -22px -30px -8px;
   z-index: -1;
   background: radial-gradient(closest-side, rgba(5, 9, 17, 0.66), rgba(5, 9, 17, 0.34) 62%, transparent);
   pointer-events: none;
@@ -434,12 +436,26 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
   content: '';
   position: absolute;
   left: 50%;
-  bottom: -9px;
+  bottom: -12px;
   width: 1px;
-  height: 9px;
+  height: 12px;
   background: linear-gradient(rgba(233, 215, 180, 0.75), rgba(233, 215, 180, 0.2));
 }
 .terrain-tag__holo canvas { display: block; }
+/* A badge in the scene: its pictograms and words in proportion to its hologram (HOLO_SCALE,
+   ui/holograms.ts), the same type and spacing, a size up. */
+.terrain-tag--badge .terrain-tag__badge { padding: 10px; gap: 9px; }
+.terrain-tag--badge .terrain-tag__icons { gap: 9px; }
+.terrain-tag--badge .terrain-tag__icon { width: 34px; height: 34px; }
+.terrain-tag--badge .terrain-tag__caption { font-size: 0.82rem; padding: 3px 9px; gap: 8px; }
+.terrain-tag--badge .terrain-tag__label { gap: 8px; }
+/* The summit's actions, three in a row: their words a little smaller, so the row stays whole. */
+.terrain-tag--row .terrain-tag__caption { font-size: 0.76rem; letter-spacing: 0.2em; }
+@media (max-width: 700px) {
+  .terrain-tag--badge .terrain-tag__badge { padding: 8px; gap: 7px; }
+  .terrain-tag--badge .terrain-tag__icon { width: 29px; height: 29px; }
+  .terrain-tag--badge .terrain-tag__caption { font-size: 0.7rem; padding: 2px 7px; }
+}
 @keyframes terrain-holo-in {
   from { opacity: 0; }
 }
@@ -570,7 +586,13 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
   /* The note reads first: always over the badges and the scene's labels. */
   z-index: 2;
 }
-.terrain-ui__note em { font-style: italic; color: var(--champagne); }
+/* The word in italics: the brand's champagne, deepened a little (same hue, richer) so it
+   reads at once against the cream, with a faint glow of its own over the navy shadow. */
+.terrain-ui__note em {
+  font-style: italic;
+  color: var(--champagne-vivid);
+  text-shadow: 0 2px 22px rgba(5, 9, 17, 0.95), 0 0 2px rgba(5, 9, 17, 0.6), 0 0 14px rgba(233, 215, 180, 0.45);
+}
 .terrain-ui__dot { color: var(--champagne); }
 
 /* Narrow screens: a little smaller, and allowed to wrap. */
@@ -584,14 +606,15 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 
 .terrain-ui__message.is-hidden, .terrain-ui__hint.is-hidden, .terrain-ui__word.is-hidden { opacity: 0; }
 
-/* The closing choices, just under the visitor's curve. The chart's time axis sits up by
-   the horizon whatever the screen (the camera's vertical field of view is fixed; reward.ts,
-   CURVE_AXIS), so the choices are anchored from the top, between the chart and the mountain. */
+/* The closing choices, just under the visitor's curve. The horizon of the closing view stands
+   at the same height on every screen (the camera's vertical field of view is fixed): the
+   words and buttons are set from it, their foot just over it, and the curve comes down to
+   just over them where the screen leaves room (reward.ts). */
 .terrain-ui__end {
   position: absolute;
   left: var(--gutter);
   right: var(--gutter);
-  top: 42.5%;
+  bottom: 45%;
   text-align: center;
   animation: terrain-end-in 0.9s ease both;
 }
@@ -599,7 +622,7 @@ html.is-terrain .stage, html.is-terrain .scroll-hint { visibility: hidden; }
 .terrain-ui__end[hidden] { display: none; }
 
 @media (max-aspect-ratio: 9/10) {
-  .terrain-ui__end { top: 38%; }
+  .terrain-ui__end { top: 38%; bottom: auto; }
 }
 
 .terrain-ui__caption {

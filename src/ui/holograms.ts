@@ -26,8 +26,24 @@ export type Illustration =
   | 'scan' | 'block' | 'flow' | 'target' | 'priorities' | 'journey' | 'roadmap'
   | 'content' | 'social' | 'influence' | 'funnel' | 'loop' | 'reach' | 'acquire' | 'owned';
 
-/** Logical size of a hologram (CSS pixels on a computer; smaller on a phone, same drawing). */
+/** Logical size of a hologram: the space each diagram is drawn in (drawHologram scales it). */
 export const HOLO = { width: 260, height: 172 };
+/**
+ * How large a hologram shows on screen, as a multiple of its logical size: the whole
+ * drawing (canvas, line work, its words) is drawn at that size, so it stays as sharp. Wider
+ * screens and portrait phones; and, where one diagram needs it, its own factor on top.
+ */
+export const HOLO_SCALE = { wide: 1.5, narrow: 0.92 };
+/**
+ * Per diagram, on wide screens: the summit's three actions stand in a row high over the top,
+ * with « Chaque résultat relié à une action. » over the last of them: a little less there,
+ * so each stays whole between its badge and the note (1.26 rather than 1.5); the last, at
+ * the right, also clear of « Quitter le Terrain » (1.2).
+ */
+export const HOLO_KIND_SCALE_WIDE: Partial<Record<Illustration, number>> = { reach: 0.84, acquire: 0.84, owned: 0.8 };
+/** On-screen scale of a hologram of this kind, on this screen. */
+export const holoScale = (kind: Illustration, narrow: boolean) =>
+  narrow ? HOLO_SCALE.narrow : HOLO_SCALE.wide * (HOLO_KIND_SCALE_WIDE[kind] ?? 1);
 /** When the drawing starts, after its badge has come in (seconds from the badge's start). */
 export const HOLO_DELAY = 0.6;
 /** How long each diagram takes to build: the more it has to say, the longer. */

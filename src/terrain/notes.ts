@@ -18,8 +18,16 @@ export interface Note {
   text: string;
   /** -1 left of the path, 1 right of it, 0 centred over its anchor. */
   side: -1 | 0 | 1;
-  /** On the summit: how high over the eye it stands (world units, terrain.ts). */
+  /** On the summit: how high over the eye it stands (world units, terrain.ts); on a portrait phone, if different. */
   over?: number;
+  overNarrow?: number;
+  /**
+   * On the summit: it stands just over the action cards and their holograms, as low as they
+   * leave room for it, and never higher than `over` (ui/epilogue.ts).
+   */
+  overCards?: boolean;
+  /** How long it takes to come in and to go (seconds); by default a sixth of its span each way. */
+  fade?: number;
 }
 
 /** What each ride note is about; the Terrain shows something in the scene for each (terrain.ts). */
@@ -63,7 +71,10 @@ const NOTE_LEAD = 9;
 const SUMMIT: (Note & { afterStop: [number, number] })[] = [
   // Over its chart, which stands up by the horizon (pace.ts, CHART.lift).
   { side: 0, afterStop: ENDING.measure.note, over: 5.7, text: 'Mesurer pour *décider*.' },
-  { side: 0, afterStop: ENDING.note, text: 'Chaque résultat relié à *une action*.' },
+  // With the first action, over the three actions and their holograms (terrain.ts places
+  // them), just clear of them: it stays while all three are presented and give their keys.
+  // On a portrait phone, never above the logo and the exit.
+  { side: 0, afterStop: ENDING.note, over: 7.9, overNarrow: 5, overCards: true, fade: 0.6, text: 'Chaque résultat relié à *une action*.' },
 ];
 
 export interface NoteState {
@@ -72,6 +83,8 @@ export interface NoteState {
   at: number | null;
   /** 0..1 through the span it shows over. */
   t: number;
+  /** The share of that span it comes in over, and goes over. */
+  edge: number;
 }
 
 /**
@@ -81,11 +94,13 @@ export interface NoteState {
 export function noteAt(distance: number, sinceStop: number | null): NoteState | null {
   if (sinceStop !== null) {
     const note = SUMMIT.find(({ afterStop: [from, to] }) => sinceStop >= from && sinceStop < to);
-    return note ? { note, at: null, t: (sinceStop - note.afterStop[0]) / (note.afterStop[1] - note.afterStop[0]) } : null;
+    if (!note) return null;
+    const span = note.afterStop[1] - note.afterStop[0];
+    return { note, at: null, t: (sinceStop - note.afterStop[0]) / span, edge: note.fade ? Math.min(0.16, note.fade / span) : 0.16 };
   }
   for (const note of RIDE) {
     if (distance >= note.from && distance < note.to) {
-      return { note, at: note.to + NOTE_LEAD, t: (distance - note.from) / (note.to - note.from) };
+      return { note, at: note.to + NOTE_LEAD, t: (distance - note.from) / (note.to - note.from), edge: 0.16 };
     }
   }
   return null;

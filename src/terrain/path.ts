@@ -21,9 +21,9 @@ import { SEA_LEVEL } from './coast';
  * et piloter »).
  */
 export const LANDMARKS = [
-  // The first, near the beach: once ashore, the visitor reaches it soon, up the first slope
-  // just beyond the cove (which hands over to the mountain by 26).
-  { word: 'Structurer', step: 1, label: 'Les fondations', at: 40 },
+  // The first, near the beach: once ashore, the visitor reaches it straight away, on the
+  // first slope just beyond the cove (which hands over to the mountain by 26).
+  { word: 'Structurer', step: 1, label: 'Les fondations', at: 30 },
   { word: 'Activer', step: 2, label: 'Les leviers adaptés', at: 125 },
   { word: 'Performer', step: 3, label: 'Mesurer et piloter', at: 195 },
 ] as const;

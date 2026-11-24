@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   abs, atan, attribute, clamp, color, cos, exp, float, fract, hash, instanceIndex, length, mix, mx_noise_float, pass, sin,
-  cameraPosition, smoothstep, uint, uniform, uv, varying, vec2, vec3,
+  cameraPosition, smoothstep, uint, uniform, uv, varying, vec2, vec3, vec4,
 } from 'three/tsl';
 import { topoTone } from './topography';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -131,6 +131,17 @@ const STRUCTURE_EDGE = 8; // softness of the forming front
 // left are thrown one after the other as the eyes turn to them, then those on the right.
 // Each landmark is marked on the ground by a dial of light around the path.
 const DIAL_RADIUS = 3.4;
+/**
+ * « Activer »'s heartbeat, over its wave's run (in wave units, pace.ts BEACON: 0 as it is
+ * released, 46 at the end of its reach, a little under six seconds at the title's pace): a
+ * first beat, a stronger second one (its height), and a slow fall back. 0..1.
+ */
+const HEARTBEAT = (wave: number) => {
+  const first = Math.exp(-(((wave - 6) / 3) ** 2)) * 0.7;
+  const second = Math.exp(-(((wave - 15) / 3.6) ** 2));
+  const fall = wave > 15 ? Math.exp(-(wave - 15) / 6) : 0;
+  return THREE.MathUtils.clamp(Math.max(first, second, fall * 0.9) * (1 - THREE.MathUtils.smoothstep(wave, 34, 44)), 0, 1);
+};
 const RUN_AHEAD = 2.4; // the light covers this much path per unit the guide travels
 // « Performer »: the ring stands on the summit; past it, the lane opens out on the top.
 const RING_RADIUS = 2.4;
@@ -229,7 +240,9 @@ const groupOut = (group: 'understand' | 'foundations') => BEATS[`${group}Out`];
 const BADGE_AHEAD = 10;
 const BADGE_CENTRING = 0.5;
 /** On the summit, how high over the top the action badges stand: above the keys' ring, with their holograms over them. */
-const SUMMIT_BADGE_LIFT = 5.4;
+// Low enough over the top that each action's larger hologram (ui/holograms.ts) stands whole
+// between its badge and the summit's note; the arcs to the keys leave from the badges.
+const SUMMIT_BADGE_LIFT = 3.6;
 /** How long a hologram takes to fold away (seconds). */
 const HOLO_FOLD = 0.5;
 
@@ -256,9 +269,14 @@ export interface TerrainOptions {
   onTags?: (views: TagView[]) => void;
   /** Called once the growth curve has formed: time to offer the closing choices. */
   onEnd?: () => void;
+  /** Where the closing words and choices will begin on screen (CSS pixels from the top), to lay the curve out over them. */
+  closingTop?: () => number;
 }
 
-export async function createTerrain({ renderer, fieldCount, surface, onWord, onNote, onTags, onEnd }: TerrainOptions) {
+/** The next frame: for long work to give the page a breath. */
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+export async function createTerrain({ renderer, fieldCount, surface, onWord, onNote, onTags, onEnd, closingTop }: TerrainOptions) {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(NAVY);
@@ -342,10 +360,11 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   // around one brighten and rise a little, and once it is charged a wave of light runs out
   // from it over the ground and under the visitor.
   const beaconPower = [STRUCTURE_AT, ACTIVATE_AT].map((at) => ({ at, charge: uniform(0), wave: uniform(-1) }));
-  const beaconTerms = beaconPower.map(({ at, charge, wave }) => {
+  const beaconTerms = beaconPower.map(({ at, charge, wave }, i) => {
     const away = vec2(worldX.sub(centerX(at)), fieldZ.add(at)).length();
-    const front = away.sub(wave).div(2.2);
-    const running = wave.greaterThan(0).select(float(1).sub(wave.div(BEACON.waveReach)), float(0));
+    // « Activer »'s wave is its heartbeat (HEARTBEAT, below): a broader front, twice as strong.
+    const front = away.sub(wave).div(i === 1 ? 3.4 : 2.2);
+    const running = wave.greaterThan(0).select(float(1).sub(wave.div(BEACON.waveReach)), float(0)).mul(i === 1 ? 2 : 1);
     return { near: exp(away.div(6.5).pow(2).negate()).mul(charge), ring: exp(front.mul(front).negate()).mul(running) };
   });
   const beaconNear = beaconTerms[0].near.add(beaconTerms[1].near);
@@ -827,17 +846,31 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   const scenePass = pass(scene, camera);
   const sceneColor = scenePass.getTextureNode('output');
   const glowPass = bloom(sceneColor, 0.6, 0.5, 0.6);
-  const pipeline = new THREE.RenderPipeline(renderer, sceneColor.add(glowPass));
+  // « Activer »'s heartbeat (HEARTBEAT): at its height every point of light in the view takes
+  // the brand's champagne, each keeping its own brightness, then goes back to its colour. The
+  // night itself (the navy of the sky and the ground between the points) stays as it is.
+  const surge = uniform(0);
+  const rendered = sceneColor.add(glowPass);
+  const luminance = rendered.rgb.dot(vec3(0.2126, 0.7152, 0.0722));
+  const champagneLinear = new THREE.Color(BRAND.champagne);
+  const champagneLuminance = 0.2126 * champagneLinear.r + 0.7152 * champagneLinear.g + 0.0722 * champagneLinear.b;
+  const inChampagne = color(BRAND.champagne).mul(luminance.div(champagneLuminance)).mul(surge.mul(0.3).add(1));
+  const aPoint = smoothstep(0.012, 0.05, luminance);
+  const pipeline = new THREE.RenderPipeline(renderer, vec4(mix(rendered.rgb, inChampagne, surge.mul(aPoint)), rendered.a));
 
+  // Built while the story still runs (ui/epilogue.ts, prepare): a breath between the
+  // heaviest parts, so no frame of the story waits long on them.
+  await nextFrame();
   const relief = createRelief(scene, Math.round(fieldCount * 1.2));
   // The sea all round the mountain, the boat, the islands out to sea (sea.ts, boat.ts, islands.ts).
   const sea = createSea(scene, { time, near: Math.round(fieldCount * 0.36), far: Math.round(fieldCount * 0.95) });
   // The boat's trail on the water, from where it really went (wake.ts).
   const wake = createWake(scene, {
-    time, arm: fieldCount >= 90000 ? 16 : 10, wash: fieldCount >= 90000 ? 8 : 5, foam: fieldCount >= 90000 ? 64 : 40,
+    time, arm: fieldCount >= 90000 ? 26 : 16, wash: fieldCount >= 90000 ? 8 : 5, foam: fieldCount >= 90000 ? 64 : 40,
   });
   const boat = createBoat(scene);
   const pier = createPier(scene);
+  await nextFrame();
   const islands = createIslands(scene, { time, count: Math.round(fieldCount * 1.1) });
   const boatEye = new THREE.Vector3();
   let boatX = 0;
@@ -846,6 +879,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   let boatSpeed = 0;
   let lastBoatAt: number | null = null;
   let lastBoatTime = 0;
+  await nextFrame();
   const reward = createReward(scene);
   const steering = createSteering(surface, LATERAL_LIMIT);
   const look = new THREE.Vector3();
@@ -1095,7 +1129,11 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     });
     // The light rises as the crown builds, peaks on arrival, then settles.
     const crownLight = smooth(distance, CROWN_BUILD[0], CROWN_BUILD[1]) * (sinceStopNow === null ? 1 : 1 - smooth(sinceStopNow, 1.8, 3.4));
-    glowPass.strength.value = (0.6 + arrival.value * 0.9 + arriving * 0.4 + crownLight * 0.25) * (narrow ? 0.5 : 1);
+    // « Activer »'s heartbeat, from its wave (beacons, above): two beats, the second the stronger.
+    const activerWave = beacons[1].wave.value;
+    const beat = activerWave > 0 ? HEARTBEAT(activerWave) : 0;
+    surge.value = beat;
+    glowPass.strength.value = (0.6 + arrival.value * 0.9 + arriving * 0.4 + crownLight * 0.25 + beat * 0.9) * (narrow ? 0.5 : 1);
     // At the summit the horizon's band steps back: the crown is what is looked at.
     // At sea and while landing, the band steps back too: it would lie across the shore and
     // the mountain's foot, just where the water meets the land.
@@ -1315,14 +1353,14 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       noteShown = false;
       return;
     }
-    const { note, at, t } = state;
+    const { note, at, t, edge } = state;
     // Portrait screens have no room beside the path: the note stands over it instead.
     const narrow = camera.aspect < 0.9;
     const side = narrow ? 0 : note.side;
     if (at === null) {
       // On the summit: over the start, far below, as it is when looking back.
       // On the summit, before the turn: over the top, ahead of the camera.
-      noteAnchor.set(centerX(distance + 18), heightAt(distance) + SUMMIT_EYE + (note.over ?? 3.2), -distance - 18);
+      noteAnchor.set(centerX(distance + 18), heightAt(distance) + SUMMIT_EYE + ((narrow ? note.overNarrow : undefined) ?? note.over ?? 3.2), -distance - 18);
     } else {
       noteAnchor.set(centerX(at) + side * NOTE_BESIDE, heightAt(at) + (side === 0 ? NOTE_OVER : NOTE_HEIGHT), -at);
     }
@@ -1336,8 +1374,8 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     }
     // Grows as it nears, but much less than in true perspective, so it stays easy to read.
     const scale = THREE.MathUtils.clamp(Math.sqrt(NOTE_REFERENCE_DEPTH / depth), 0.8, 1.2);
-    // It comes in and goes over the first and last sixth of its stretch.
-    const opacity = smooth(t, 0, 0.16) * (1 - smooth(t, 0.84, 1));
+    // It comes in and goes over the first and last sixth of its stretch (or its own fade).
+    const opacity = smooth(t, 0, edge) * (1 - smooth(t, 1 - edge, 1));
     noteShown = true;
     onNote?.({ note, x: noteAnchor.x, y: noteAnchor.y, align: side === 0 ? 0 : side === -1 ? -1 : 1, scale, opacity });
   }
@@ -1410,6 +1448,9 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       summitEye.set(centerX(distance), heightAt(distance) + SUMMIT_EYE + TURN_RISE, -distance + 2 - TURN_BACK);
       reward.start({
         trajectory, end: distance, eye: summitEye, pitch: HORIZON_PITCH, fov: FOV, aspect: camera.aspect,
+        // The curve's axis comes down to just over the closing words (40 px clear of them).
+        closingTop: closingTop ? closingTop() / Math.max(1, renderer.domElement.clientHeight) : undefined,
+        closingGap: 40 / Math.max(1, renderer.domElement.clientHeight),
       });
     }
     if (curvePlaced) {
@@ -1440,36 +1481,49 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     pipeline.render();
   };
 
-  // Settle positions, then compile everything while the light still covers the screen.
-  // Most of the Terrain is hidden at the start (dials, levers, monitor, summit, curve…):
-  // drawn for the first time mid-ride, each would stop the frame while its shaders are
-  // built, the jolts felt along the way. So for this one warm-up, everything is drawn,
-  // through the same passes as the ride, then put back as it was.
+  // Settle positions.
   frame(0);
-  const warmed: { object: THREE.Object3D; visible: boolean; culled: boolean }[] = [];
-  scene.traverse((object) => {
-    // Not what has nothing to draw yet (the curve of the summit, laid out at the end).
-    const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
-    if (geometry && !(object as THREE.Sprite).isSprite && !geometry.getAttribute('position')) return;
-    warmed.push({ object, visible: object.visible, culled: object.frustumCulled });
-    object.visible = true;
-    object.frustumCulled = false;
-  });
-  render();
-  await Promise.race([
-    renderer.compileAsync(scene, camera),
-    new Promise((resolve) => window.setTimeout(resolve, 4000)),
-  ]);
-  for (const { object, visible, culled } of warmed) {
-    object.visible = visible;
-    object.frustumCulled = culled;
-  }
-  frame(0);
-  render();
+
+  /**
+   * Every shader of the Terrain, prepared before it is first drawn. Most of it is hidden at
+   * the start (dials, levers, monitor, summit, curve…): drawn for the first time mid-ride,
+   * each would stop the frame while its shaders are built. So everything is shown for this
+   * preparation only, then put back as it was.
+   *
+   * It runs in the background, while the story still plays (ui/epilogue.ts, prepare): one
+   * object after the other, three.js yielding between them (compileAsync), never drawing
+   * nor freezing a frame. (Drawing everything at once to warm it, as before, built all its
+   * shaders in a single frame: the story's last frames, the push into the doorway, froze for
+   * a second and a half, and the light waited another for the rest.) With a time limit:
+   * compileAsync can fail to settle on the WebGL 2 backend.
+   */
+  let warming: Promise<void> | null = null;
+  const warm = () => (warming ??= (async () => {
+    const warmed: { object: THREE.Object3D; visible: boolean; culled: boolean }[] = [];
+    scene.traverse((object) => {
+      // Not what has nothing to draw yet (the curve of the summit, laid out at the end).
+      const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+      if (geometry && !(object as THREE.Sprite).isSprite && !geometry.getAttribute('position')) return;
+      warmed.push({ object, visible: object.visible, culled: object.frustumCulled });
+      object.visible = true;
+      object.frustumCulled = false;
+    });
+    await Promise.race([
+      renderer.compileAsync(scene, camera),
+      new Promise((resolve) => window.setTimeout(resolve, 8000)),
+    ]);
+    for (const { object, visible, culled } of warmed) {
+      object.visible = visible;
+      object.frustumCulled = culled;
+    }
+    frame(0);
+  })());
 
   return {
     frame,
     render,
+    /** Prepares its shaders in the background (once; the same promise after). */
+    warm,
     /** Every point of the visitor's path so far (kept for the reward). */
     trajectory,
     /** Development only: jump along the path, to check a landmark without riding there. */

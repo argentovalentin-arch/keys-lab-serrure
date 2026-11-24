@@ -27,6 +27,13 @@ export interface RewardLayout {
   /** The camera's vertical field of view (degrees) and aspect, to size the curve to the screen. */
   fov: number;
   aspect: number;
+  /**
+   * Where the closing words and choices begin on screen (a share of its height from the
+   * top, ui/epilogue.ts), and how far over them the time axis stays (same share): on a
+   * screen with room, the curve comes down to just over them.
+   */
+  closingTop?: number;
+  closingGap?: number;
 }
 
 /** A thin ribbon along a polyline, as quads: -1 / +1 on its two edges for a soft falloff. */
@@ -153,7 +160,8 @@ export function createReward(scene: THREE.Scene) {
 
   return {
     /** Builds the chart from the ride that just ended, in the sky beyond the start. */
-    start({ trajectory, end, eye, pitch, fov, aspect }: RewardLayout) {
+    start(layout: RewardLayout) {
+      const { trajectory, end, eye, pitch, fov, aspect } = layout;
       // In the chart's own frame: origin at the eye, z along the final gaze (pitched down
       // by `pitch`), so the chart is square to it. Far beyond the start, above the valley.
       chart.position.copy(eye);
@@ -168,7 +176,9 @@ export function createReward(scene: THREE.Scene) {
       // smaller (in proportion) to stay whole under the top of the view.
       const narrow = aspect < 0.9;
       const size = narrow ? CURVE_SIZE.narrow : CURVE_SIZE.wide;
-      const base = centre + (narrow ? CURVE_AXIS.narrow : CURVE_AXIS.wide) * halfHeight;
+      // Its axis no higher than CURVE_AXIS; lower where the closing words leave room under it.
+      const room = layout.closingTop === undefined || narrow ? Infinity : 1 - 2 * (layout.closingTop - (layout.closingGap ?? 0));
+      const base = centre + Math.min(narrow ? CURVE_AXIS.narrow : CURVE_AXIS.wide, room) * halfHeight;
       const rise = 0.66 * size * halfHeight;
       const width = Math.min(halfHeight * aspect * 2 * 0.62, halfHeight * 2.6) * size;
       const lineWidth = away * 0.0032;

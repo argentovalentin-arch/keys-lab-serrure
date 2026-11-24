@@ -3,7 +3,7 @@ import type * as THREE from 'three/webgpu';
 import type { NoteView, TagView, Terrain } from '../terrain/terrain';
 import type { Landmark } from '../terrain/path';
 import { ICONS } from '../terrain/icons';
-import { HOLO, drawHologram, type Illustration } from './holograms';
+import { HOLO, drawHologram, holoScale, type Illustration } from './holograms';
 
 type Mode = 'story' | 'entering' | 'terrain' | 'leaving';
 /** A box on screen, in CSS pixels. */
@@ -21,8 +21,10 @@ export interface EpilogueOptions {
   lenis: Lenis;
   /** The « Entrer » button; focus returns to it on the way out. */
   trigger: HTMLButtonElement;
-  /** Field particles for the Terrain, read when entering (the quality tier may have changed). */
+  /** Field particles for the Terrain, read when it is prepared and again when entering (the quality tier may have changed). */
   fieldCount: () => number;
+  /** Told while the Terrain is being prepared in the background (true), then done (false). */
+  onPreparing?: (busy: boolean) => void;
   /** Told when the Terrain takes over the screen (true) and when the story is back (false). */
   onTerrainChange?: (inside: boolean) => void;
 }
@@ -35,6 +37,8 @@ export interface EpilogueOptions {
 export class Epilogue {
   private mode: Mode = 'story';
   private terrain: Terrain | null = null;
+  /** The Terrain built ahead, while the story plays (prepare), and for how many field particles. */
+  private prepared: { count: number; terrain: Promise<Terrain> } | null = null;
   private savedScroll = 0;
   private pushStart = 0;
   private timers: number[] = [];
@@ -50,6 +54,8 @@ export class Epilogue {
   private readonly tagLayer = document.querySelector<HTMLElement>('#terrain-tags')!;
   private readonly tagElements = new Map<string, {
     root: HTMLElement; thread: HTMLElement; label: HTMLElement; width: number; height: number; clear: number; quiet: boolean; confirmed: boolean;
+    /** With a hologram: the width and height of the badge and its words alone, under it (the hologram takes the rest). */
+    footWidth: number; footHeight: number;
     /** Where it stood last frame (screen y of its foot), if it was placed. */
     ly?: number;
     holo: { wrap: HTMLElement; ctx: CanvasRenderingContext2D; kind: Illustration; ratio: number; scale: number } | null;
@@ -105,6 +111,48 @@ export class Epilogue {
     this.terrain?.render();
   }
 
+  /**
+   * Builds the Terrain ahead, while the visitor is still in the story, and prepares its
+   * shaders in the background (terrain.ts, warm): « Entrer » then finds it ready. Its
+   * construction is cut into short steps and its shaders are prepared one object at a time,
+   * so the story never stops for it. Again if the quality tier has changed since.
+   */
+  prepare(): Promise<void> {
+    if (this.mode !== 'story') return Promise.resolve();
+    const count = this.options.fieldCount();
+    if (this.prepared?.count === count) return this.prepared.terrain.then(() => {}, () => {});
+    this.discardPrepared();
+    const terrain = this.build(count);
+    this.prepared = { count, terrain };
+    this.options.onPreparing?.(true);
+    terrain
+      .then((built) => built.warm())
+      .catch(() => {})
+      .finally(() => this.options.onPreparing?.(false));
+    // Resolves once it is built (its shaders are still being prepared).
+    return terrain.then(() => {}, () => {});
+  }
+
+  private build(count: number): Promise<Terrain> {
+    return import('../terrain/terrain').then(({ createTerrain }) =>
+      createTerrain({
+        renderer: this.options.renderer,
+        fieldCount: count,
+        surface: this.ui,
+        onWord: (word) => this.showWord(word),
+        onNote: (note) => this.showNote(note),
+        onTags: (tags) => this.showTags(tags),
+        onEnd: () => this.showChoices(),
+        closingTop: () => this.closingTop(),
+      }));
+  }
+
+  private discardPrepared(): void {
+    if (!this.prepared) return;
+    void this.prepared.terrain.then((terrain) => terrain.dispose()).catch(() => {});
+    this.prepared = null;
+  }
+
   private async enter(): Promise<void> {
     if (this.mode !== 'story') return;
     this.mode = 'entering';
@@ -117,18 +165,18 @@ export class Epilogue {
     this.options.onTerrainChange?.(true);
 
     try {
-      // The module and its shaders load while the light covers the screen.
+      // Built ahead while the story played (prepare), it is ready, or nearly: the push into
+      // the doorway plays out whole while the light comes up. If it was not (or not for this
+      // quality tier), it is built now, under the light.
+      const count = this.options.fieldCount();
+      const ahead = this.prepared?.count === count ? this.prepared.terrain : null;
+      if (!ahead) this.discardPrepared();
+      this.prepared = null;
       const [terrain] = await Promise.all([
-        import('../terrain/terrain').then(({ createTerrain }) =>
-          createTerrain({
-            renderer: this.options.renderer,
-            fieldCount: this.options.fieldCount(),
-            surface: this.ui,
-            onWord: (word) => this.showWord(word),
-            onNote: (note) => this.showNote(note),
-            onTags: (tags) => this.showTags(tags),
-            onEnd: () => this.showChoices(),
-          })),
+        (ahead ?? this.build(count)).then(async (built) => {
+          await built.warm();
+          return built;
+        }),
         wait(VEIL_MS),
       ]);
       this.terrain = terrain;
@@ -163,6 +211,8 @@ export class Epilogue {
     this.terrain?.dispose();
     this.terrain = null;
     this.restoreStory();
+    // Ready again for the next « Entrer », once the story has settled.
+    window.setTimeout(() => void this.prepare(), 2500);
   }
 
   /**
@@ -213,7 +263,13 @@ export class Epilogue {
     }
     if (!this.noteSize) this.noteSize = { width: this.note.offsetWidth, height: this.note.offsetHeight };
     let x = ((view.x + 1) / 2) * window.innerWidth;
-    const y = ((1 - view.y) / 2) * window.innerHeight;
+    let y = ((1 - view.y) / 2) * window.innerHeight;
+    // Over the summit's action cards: down to just over them and their holograms, where they
+    // leave room (never higher than its own place, never over them).
+    if (view.note.overCards) {
+      const room = this.roomOverCards(this.noteSize.height * view.scale);
+      if (room !== null && room > y) y = room;
+    }
     // In the bends the anchor can come near the edge: the text is kept whole on screen.
     const width = this.noteSize.width * view.scale;
     const margin = Math.min(48, window.innerWidth * 0.05);
@@ -233,6 +289,23 @@ export class Epilogue {
     const left = x - (view.align === -1 ? width : view.align === 1 ? 0 : width / 2);
     const height = this.noteSize.height * view.scale;
     this.noteBox = view.opacity > 0.01 ? { left: left - 12, right: left + width + 12, top: y - height / 2 - 10, bottom: y + height / 2 + 10 } : null;
+  }
+
+  /**
+   * Over the summit's three action cards (terrain.ts, `summit-…`): the lowest screen y the
+   * middle of a note of this height may take without coming over them or their holograms,
+   * whether or not their holograms show this frame (so the note keeps still as they come
+   * and go); null until a card has been placed.
+   */
+  private roomOverCards(height: number): number | null {
+    const narrow = window.innerWidth < 700;
+    const holo = Math.max(...(['reach', 'acquire', 'owned'] as Illustration[]).map((kind) => holoScale(kind, narrow))) * HOLO.height;
+    let top = Infinity;
+    for (const [id, element] of this.tagElements) {
+      if (!id.startsWith('summit-') || element.ly === undefined || element.footHeight < 0) continue;
+      top = Math.min(top, element.ly - element.footHeight - 4 - holo - 12);
+    }
+    return Number.isFinite(top) ? top - 22 - height / 2 : null;
   }
 
   /**
@@ -278,6 +351,8 @@ export class Epilogue {
       if (!element) {
         const root = document.createElement('div');
         root.className = `terrain-tag terrain-tag--${view.kind}`;
+        // The summit's three actions stand in a row (terrain.ts): their words a little closer set.
+        if (view.id.startsWith('summit-')) root.classList.add('terrain-tag--row');
         const thread = document.createElement('span');
         thread.className = 'terrain-tag__thread';
         const label = document.createElement('span');
@@ -313,7 +388,7 @@ export class Epilogue {
         label.append(caption);
         root.append(thread, label);
         this.tagLayer.append(root);
-        element = { root, thread, label, width: -1, height: -1, clear: 1, quiet: false, confirmed: false, holo: null };
+        element = { root, thread, label, width: -1, height: -1, footWidth: -1, footHeight: -1, clear: 1, quiet: false, confirmed: false, holo: null };
         this.tagElements.set(view.id, element);
       }
       if (element.quiet !== view.quiet) {
@@ -328,7 +403,7 @@ export class Epilogue {
       // Its hologram, over the badge, while it is the one in focus (ui/holograms.ts): the
       // badge, its words and its drawing, one composition.
       if (view.holo && !element.holo) {
-        const scale = window.innerWidth < 700 ? 0.7 : 1;
+        const scale = holoScale(view.holo.kind, window.innerWidth < 700);
         const ratio = Math.min(window.devicePixelRatio || 1, 2);
         const wrap = document.createElement('span');
         wrap.className = 'terrain-tag__holo';
@@ -360,6 +435,13 @@ export class Epilogue {
       if (element.width < 0) {
         element.width = element.label.offsetWidth;
         element.height = element.label.offsetHeight;
+        // A card with a hologram is two shapes, not one box: the wide drawing over the narrower
+        // badge and its words. Its neighbours may stand beside the badge, under the drawing.
+        const holoHeight = element.holo ? element.holo.wrap.offsetHeight + 12 : 0;
+        element.footHeight = element.height - holoHeight;
+        element.footWidth = element.holo
+          ? Math.max(...[...element.label.children].filter((child) => child !== element.holo?.wrap).map((child) => (child as HTMLElement).offsetWidth))
+          : element.width;
       }
       const gx = ((view.gx + 1) / 2) * w;
       const gy = ((1 - view.gy) / 2) * h;
@@ -374,7 +456,20 @@ export class Epilogue {
       const height = element.height + 4;
       // The whole card (its hologram included) stays on screen.
       ly = Math.min(Math.max(ly, height + 8), h - 8);
-      const hits = (y: number) => placed.find((r) => lx - half < r.right && lx + half > r.left && y - height < r.bottom && y > r.top);
+      const foot = element.footHeight + 4;
+      const footHalf = element.footWidth / 2;
+      const shapes = (y: number): Box[] => (foot < height - 1
+        ? [
+          { left: lx - footHalf, right: lx + footHalf, top: y - foot, bottom: y },
+          // (Its foot stands in the row of its neighbours' badges: the drawing over it stops a
+          // little above that row, so a neighbour standing level with it never counts as under it.)
+          { left: lx - half, right: lx + half, top: y - height, bottom: y - foot - 6 },
+        ]
+        : [{ left: lx - half, right: lx + half, top: y - height, bottom: y }]);
+      const hits = (y: number) => {
+        const own = shapes(y);
+        return placed.find((r) => own.some((b) => b.left < r.right && b.right > r.left && b.top < r.bottom && b.bottom > r.top));
+      };
       // A badge handing over to the next (its hologram folding away) is not moved: it fades
       // where it stood, rather than jumping across the screen as it goes.
       const folding = Boolean(view.holo && view.holo.fold > 0);
@@ -394,7 +489,7 @@ export class Epilogue {
       // fading out until there is, rather than lying over a text.
       const blocked = Boolean(hits(ly));
       element.clear += ((blocked ? 0 : 1) - element.clear) * (blocked ? 0.4 : 0.18);
-      if (!blocked) placed.push({ left: lx - half - 4, right: lx + half + 4, top: ly - height, bottom: ly });
+      if (!blocked) placed.push(...shapes(ly).map((b) => ({ left: b.left - 4, right: b.right + 4, top: b.top, bottom: b.bottom })));
       element.ly = ly;
       element.root.style.transform = `translate(${lx.toFixed(1)}px, ${ly.toFixed(1)}px)`;
       // Secondary to the note: never quite as bright.
@@ -417,6 +512,17 @@ export class Epilogue {
         this.tagElements.delete(id);
       }
     }
+  }
+
+  /** Where the closing words and choices will begin (CSS pixels from the top), measured unseen. */
+  private closingTop(): number {
+    const shown = !this.end.hidden;
+    this.end.style.visibility = 'hidden';
+    this.end.hidden = false;
+    const top = this.end.getBoundingClientRect().top;
+    this.end.hidden = !shown;
+    this.end.style.visibility = '';
+    return top;
   }
 
   /** Once the curve has formed: the three closing choices, focus on the first. */

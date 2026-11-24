@@ -40,20 +40,22 @@ interface Zone {
  * steps onto the deck and walks it to the beach behind the guide's light.
  */
 export const SEA = {
-  start: -64,
+  /** Where the boat sets off: closer in than it was (-64), a shorter, more direct crossing. */
+  start: -46,
   /**
    * The eyes on the islands, then turning to the shore: [still on them until, turned by].
-   * Long enough to find them, then a turn of about four seconds, eased in and out.
+   * Long enough to find them and take them in, then a turn of three to four seconds, eased
+   * in and out.
    */
-  turn: [-61, -50.5] as const,
-  /** From here the ride slows for the approach (the boat then some twelve units from its mooring). */
-  approach: -20,
+  turn: [-43.5, -36] as const,
+  /** From here the ride slows for the approach (the boat then some ten units from its mooring). */
+  approach: -18,
   /** The visitor's eye in the boat: this far behind the boat's middle (towards the stern). */
   eyeBehind: 1.25,
   /** Over how much of the boat's travel it brakes to a stop alongside. */
   brake: 1.6,
   /** Once moored, the visitor steps out onto the deck: over this stretch of the boat's (would-be) travel past its mooring. */
-  stepOff: [2.4, 7.4] as const,
+  stepOff: [1.8, 6.2] as const,
   /** Walking the deck to the beach and onto the land: the ride's pace for it. */
   ashore: [-3, 8] as const,
 } as const;
@@ -64,11 +66,13 @@ const actZone = (why: string, act: Act, ease = 3): Zone => ({ why, from: act.fro
 
 export const ZONES: Zone[] = [
   { why: 'The sea: the horizon and the islands, behind the boat', from: SEA.start, to: SEA.turn[0], ease: 2, pace: 0.1 },
-  { why: 'The eyes turn along the coast to the shore', from: SEA.turn[0], to: SEA.turn[1], ease: 2, pace: 0.34 },
-  { why: 'The crossing', from: SEA.turn[1], to: SEA.approach, ease: 4, pace: 0.72 },
-  { why: 'The approach: the boat slows, comes alongside the landing stage, stops, settles', from: SEA.approach, to: SEA.ashore[0], ease: 5, pace: 0.3 },
-  { why: 'Ashore: along the landing stage, onto the beach, at a walk', from: SEA.ashore[0], to: SEA.ashore[1], ease: 3, pace: 0.7 },
-  { why: 'Structurer: the beacon charges, the wave runs out, the title reads', from: STRUCTURE_AT - 14, to: STRUCTURE_AT + 2, ease: 6, pace: kept(0.34) },
+  { why: 'The eyes turn along the coast to the shore', from: SEA.turn[0], to: SEA.turn[1], ease: 2, pace: 0.36 },
+  { why: 'The crossing', from: SEA.turn[1], to: SEA.approach, ease: 4, pace: 0.8 },
+  { why: 'The approach: the boat slows, comes alongside the landing stage, stops, settles', from: SEA.approach, to: SEA.ashore[0], ease: 4, pace: 0.38 },
+  { why: 'Ashore: along the landing stage, onto the beach, at a walk', from: SEA.ashore[0], to: SEA.ashore[1], ease: 3, pace: 0.82 },
+  // Just past the beach: the walk ashore runs straight into it, the beacon charging as the
+  // visitor comes up (a little later into the slow pace than before), the title read as it was.
+  { why: 'Structurer: the beacon charges, the wave runs out, the title reads', from: STRUCTURE_AT - 10, to: STRUCTURE_AT + 2, ease: 5, pace: kept(0.34) },
   { why: 'Activer: the beacon charges, the title reads', from: ACTIVATE_AT - 13, to: ACTIVATE_AT + 2, ease: 6, pace: kept(0.34) },
   actZone('Les bons leviers: the note, then the levers rise', ACTIVATE_ACT),
   // Slowed from before its title, coming from the open stretch after the levers, so the title
@@ -108,7 +112,7 @@ function stretchPace(order: Stretch, d: number, enter = 3, leave = 3): number {
 const LEVER_SLOW = 0.95;
 const LEVER_FAST = 3.2;
 /** From where a lever is named, how much of the way to the next the ride stays slow. */
-const LEVER_HOLD = 4.2;
+const LEVER_HOLD = 4.8;
 /** Once the levers have risen, on to the first; once the last is thrown, on up the path. */
 const LEVER_APPROACH = 1.6;
 const LEVER_LEAVE = 2;

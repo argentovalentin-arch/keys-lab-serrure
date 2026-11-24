@@ -73,7 +73,8 @@ const NOTE = 4.4;
  * A badge in focus, the ride slowed for it: its hologram's own presentation (it starts after
  * HOLO_DELAY, builds over HOLO_BUILD, ui/holograms.ts), then held long enough to be read.
  */
-const READ = 2.4;
+// (Three seconds: the diagrams are shown larger, ui/holograms.ts HOLO_SCALE, to be looked at.)
+const READ = 3;
 const observe = (kind: Illustration) => HOLO_DELAY + 0.25 + HOLO_BUILD[kind] + READ;
 /** Between two badges the ride picks up: this long, this much faster than while reading. */
 const TRAVEL = 0.9;
@@ -158,8 +159,9 @@ export const LEVERS_END = 169;
  *    next comes (ui/holograms.ts: « reach », « acquire », « owned »);
  * 4. once all three have been shown, a thread of light links them (summit.ts): three parts
  *    of one whole;
- * 5. then each action gives its key: from each badge an arc goes down to where its key
- *    forms, with « Chaque résultat relié à une action. » (one event, as before);
+ *    « Chaque résultat relié à une action. » comes in with the first of them, over them and
+ *    their holograms, and stays while all three are presented and give their keys;
+ * 5. then each action gives its key: from each badge an arc goes down to where its key forms;
  * 6. the keys, all formed, gather on their ring: the key ring; the note goes as it closes;
  * 7. the ring taken in hand, the half-turn to look down over the whole climb, the sea and
  *    the islands; the eyes rise to the horizon, the curve draws itself, the closing choices.
@@ -177,10 +179,15 @@ const HOLO_SPAN = 4.6;
 const LINK: [number, number] = [ENDING_BADGES[2] + HOLO_SPAN + 0.1, ENDING_BADGES[2] + HOLO_SPAN + 1.3];
 /** Then the keys: each arc sets off from its action, a fifth of a second apart, with the note. */
 const KEYS_AT = [LINK[1] + 0.1, LINK[1] + 0.3, LINK[1] + 0.5];
-const ENDING_NOTE: [number, number] = [KEYS_AT[0], KEYS_AT[0] + 3.6];
 const GATHER = KEYS_AT[0] + 1.6;
 /** The actions go as the ring is taken in hand. */
-const ACTIONS_END = ENDING_NOTE[1] + 0.2;
+const ACTIONS_END = KEYS_AT[0] + 3.8;
+/**
+ * « Chaque résultat relié à une action. »: in with the first action (its own trigger, not the
+ * keys'), over the three actions and their holograms while they are presented one after the
+ * other, linked and give their keys; it goes with the actions, the ring in hand.
+ */
+const ENDING_NOTE: [number, number] = [ENDING_BADGES[0], ACTIONS_END - 0.2];
 /** Everything from the key ring in hand on moves together, after the actions. */
 const AFTER = ACTIONS_END - 8.8;
 export const ENDING = {

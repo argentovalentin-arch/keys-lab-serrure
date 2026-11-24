@@ -129,7 +129,10 @@ async function start(): Promise<void> {
     stream.setCount(STREAM[next]);
     useBloom = next !== 'low';
     console.info(`KEYS Lab: qualité ${next}`);
+    // A Terrain prepared for the previous tier is built again for this one (ui/epilogue.ts).
+    window.setTimeout(() => void prepareTerrain?.(), 0);
   };
+  let prepareTerrain: (() => Promise<void>) | null = null;
   const monitor = new FrameMonitor(tier, applyTier, forcedTier() === null);
   console.info(`KEYS Lab: ${backendName}, qualité ${tier}, ${formatNumber(particles.capacity)} particules`);
 
@@ -158,18 +161,22 @@ async function start(): Promise<void> {
   const stage = new Stage(CHAPTERS, reducedMotion);
   stage.show(0);
   const lenis = new Lenis({ autoRaf: false, lerp: reducedMotion ? 1 : 0.15 });
-  // The Terrain epilogue: its module is only fetched when the visitor presses « Entrer ».
+  // The Terrain epilogue: built ahead while the story plays (Epilogue.prepare, below), so
+  // « Entrer » leads straight in.
   const epilogue = new Epilogue({
     renderer,
     lenis,
     trigger: stage.action,
     fieldCount: () => Math.round(TIERS[monitor.current].particles * 0.45),
+    onPreparing: (busy) => monitor.hold(busy),
     onTerrainChange: (inside) => {
       pixelCap = inside ? (window.matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5) : Infinity;
       applyPixelRatio(monitor.current);
       drawSize.set(0, 0);
     },
   });
+
+  prepareTerrain = () => epilogue.prepare();
 
   // Pointer, projected on the z = 0 plane then moved into the particles' local space.
   const ndc = new THREE.Vector2();
@@ -337,6 +344,11 @@ async function start(): Promise<void> {
     sampleFrame();
   });
 
+  // The Terrain is built while the loader still shows (a few tenths of a second), and its
+  // shaders are then prepared in the background as the story plays, long before the visitor
+  // reaches the door: « Entrer » leads straight in. Again if the quality tier changes.
+  await loader.step('Préparation du Terrain', 0.93);
+  await epilogue.prepare();
   await loader.finish();
 }
 

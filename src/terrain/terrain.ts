@@ -242,7 +242,12 @@ const BADGE_CENTRING = 0.5;
 /** On the summit, how high over the top the action badges stand: above the keys' ring, with their holograms over them. */
 // Low enough over the top that each action's larger hologram (ui/holograms.ts) stands whole
 // between its badge and the summit's note; the arcs to the keys leave from the badges.
-const SUMMIT_BADGE_LIFT = 3.6;
+// `rise`: on a screen tall enough, the whole row stands this much higher, and with it its
+// holograms and the note over them (epilogue.ts, roomOverCards), all as one. The badge, its
+// hologram and the note are a set size on screen while the row's place scales with the screen:
+// on a short one (`from` px high) the note already stands at the top, so the row stays where it
+// was; from `to` px high it rises in full. On a portrait phone it stays where it was.
+const SUMMIT_BADGE_LIFT = { base: 3.6, rise: 0.68, from: 760, to: 900 };
 /** How long a hologram takes to fold away (seconds). */
 const HOLO_FOLD = 0.5;
 
@@ -716,6 +721,9 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
   };
   /** Where its badge stands: over that point, measured from the top where the ride stopped (the ground falls away beyond it). */
   const summitBadgeAnchor = (i: number) => summitBadgeGround(i).setY(heightAt(distance));
+  /** How high over the top the action badges stand this frame (SUMMIT_BADGE_LIFT). */
+  const summitLift = () => SUMMIT_BADGE_LIFT.base + (narrowView ? 0
+    : SUMMIT_BADGE_LIFT.rise * smooth(renderer.domElement.clientHeight, SUMMIT_BADGE_LIFT.from, SUMMIT_BADGE_LIFT.to));
   /** When the i-th action badge has come in (seconds after the stop): once its note has been read (timeline.ts). */
   const summitBadgeAt = (i: number) => ENDING.badges[i];
   // On the summit, still facing ahead, after « Mesurer pour décider » (timeline.ts, ENDING):
@@ -734,7 +742,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
     tags.push({
       id: `summit-${i}`, icons, caption, illustration, focusAfterStop: ENDING.holos[i],
       ground: () => summitBadgeAnchor(i),
-      lift: SUMMIT_BADGE_LIFT,
+      get lift() { return summitLift(); },
       // On a portrait phone there is room for one at a time with its hologram: each steps out as
       // the next comes, and all three come back, as their marks alone, to be linked.
       strength: (_d, s) => (s === null ? 0
@@ -1253,7 +1261,7 @@ export async function createTerrain({ renderer, fieldCount, surface, onWord, onN
       summitHere.set(centerX(distance), heightAt(distance), -distance);
       // On a portrait phone the keys' row is drawn closer together, so the outer ones stay in view.
       // Each key's arc sets off from its action's badge (where its card stands).
-      summit.place(summitHere, [0, 1, 2].map((i) => summitBadgeAnchor(i).setY(heightAt(distance) + SUMMIT_BADGE_LIFT)), summitTop, narrowView ? 2.5 : 4);
+      summit.place(summitHere, [0, 1, 2].map((i) => summitBadgeAnchor(i).setY(heightAt(distance) + summitLift())), summitTop, narrowView ? 2.5 : 4);
     }
     // The arrival's column thins to a thread before the summit's first note.
     summit.update(endedAt === null ? null : elapsed - endedAt, camera, ENDING.measure.note[0], {
